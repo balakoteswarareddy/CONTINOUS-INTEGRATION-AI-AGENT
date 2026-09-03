@@ -398,6 +398,24 @@ respx-mocked client tests and adapter unit tests.
 > presenting this system as production-ready. Test harness is fully wired
 > and waiting (test_github_actions_dispatch.py) — this is a
 > credentials/access gap only, not a code gap.
+>
+> **PRE-PRODUCTION GATE item 2 (same severity — blocks real rollout, does
+> not block further development): SIGNING IS TEST-KEY + STAND-IN-VERIFY
+> ONLY.** (a) Keyless OIDC signing (Section 7.2 preference: KMS/HSM-backed
+> or keyless) has never been executed; the implemented path is the flagged
+> self-managed test-key fallback (Batch 7 decision 2). (b) The cosign
+> verify wrapper is real code (actual `subprocess.run`, fail-closed
+> exit-code semantics, audited, regression-tested) but the tests exercise
+> it against a small real shell-script stand-in that performs genuine
+> sha256 digest verification — the REAL Sigstore `cosign` binary has never
+> run in this environment (not installed in the sandbox), and no genuine
+> Sigstore signature/bundle has ever been verified (including Rekor
+> transparency-log behavior). Before production: run signing+verify
+> end-to-end against a real cosign binary (keyless OIDC preferred, or a
+> KMS/HSM-backed key), pass AND tamper scenarios, evidence attached to
+> NOTES.md. Test harness exists (test_signing_service.py
+> TestVerifySignatureReal) — swapping the stand-in binary path for the real
+> binary is the only change required.
 
 1. Reference architecture PDF is not in the repo; docs/README.md stands in
    (Batch 1). All section numbers cite the report from the batch specs.
