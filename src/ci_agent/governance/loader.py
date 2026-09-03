@@ -141,6 +141,23 @@ def load_all_policy_files() -> dict[str, dict[str, Any]]:
     return {name: load_policy_file(name) for name in POLICY_FILE_NAMES}
 
 
+def load_org_policy_version() -> str:
+    """Return the single governed policy version shared by all 7 policy files.
+
+    All family files must declare the SAME ``policy_version`` — a mixed-version
+    catalog is a governance error and fails loudly (used e.g. to pin
+    ``ProjectProfile.policy_version_pinned``).
+    """
+    loaded = load_all_policy_files()
+    versions = {str(data["policy_version"]) for data in loaded.values()}
+    if len(versions) != 1:
+        detail = ", ".join(
+            f"{name}={data['policy_version']}" for name, data in sorted(loaded.items())
+        )
+        raise GovernanceError(f"Policy family files disagree on policy_version: {detail}")
+    return versions.pop()
+
+
 def load_all_governance_files() -> dict[str, dict[str, Any]]:
     """Load and validate every governance file, keyed by repo-relative-style label."""
     loaded: dict[str, dict[str, Any]] = {}

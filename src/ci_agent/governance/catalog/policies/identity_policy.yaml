@@ -1,8 +1,18 @@
 # Identity policy family (CI-Agent Production Architecture Report, Section 6 — Identity).
 #
-# Deny-by-default posture (Section 7 trust boundaries): no repository, branch
-# or identity may execute until it is explicitly allowlisted here.
+# Fail-closed posture (Section 7 trust boundaries): only repositories/branches
+# matching these glob patterns may run pipelines — everything else is rejected
+# by the ingress (Batch 2) with an audited 403.
+#
+# Batch 2 note: this file now ships with an example-org allowlist so the
+# webhook gateway is functional out of the box. Operators MUST scope these
+# patterns to their real organization before exposing the endpoint. See
+# NOTES.md ("Batch 2") which supersedes the Batch 1 "empty allowlists" default.
 policy_version: "1.0.0"
-allowed_repositories: []
-allowed_branches: []
+allowed_repositories:
+  - "example-org/*"
+allowed_branches:
+  - "main"
+  - "release/*"
+  - "feature/*"
 allowed_identities: []

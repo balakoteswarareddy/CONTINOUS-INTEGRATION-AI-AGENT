@@ -23,6 +23,10 @@ htmlcov/
 .env.*
 !.env.example
 
+# --- Local databases (SQLite dev files) ---
+*.db
+*.sqlite3
+
 # --- Editors / OS ---
 .idea/
 .vscode/

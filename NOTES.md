@@ -100,3 +100,78 @@ ExecutionPlan compiler), runner adapters (GitHub Actions), Evidence Store
 persistence, Report Generator, AI integration, intake answer storage,
 secrets/identity binding, and the waiver/exception workflow. None of these are
 stubbed in code; the models above define the contracts they will implement.
+
+---
+
+# Batch 2 Notes — Audit Store, Ingress, Requirements Resolver
+
+## Deviations & decisions (per Batch 2 Section 6/8 traceability rules)
+
+1. **`AuditLogEntry.run_id` is an indexed plain column, not a SQL FK.** The
+   batch spec asks for both (a) an FK to `run_records.run_id` and (b) audit
+   entries for rejections that happen BEFORE any run exists (invalid
+   signature, disallowed repository/branch, duplicates). Both cannot hold:
+   a pre-run rejection has no parent row. Resolution: the FK constraint is
+   relaxed to an indexed column, and pre-run rejections chain under a
+   synthetic id `rejected:<delivery_id>` (or `rejected:unknown` when the
+   delivery header is absent). Requirement (b) — "even rejections are
+   auditable events" — wins because Sections 4.2/9 demand complete audit
+   trails; the alternative (creating RunRecords for rejected requests) would
+   pollute run history with non-runs.
+2. **`project_id` at ingress time = repository full name.** The project
+   registry / onboarding API does not exist yet (explicitly out of scope per
+   Task C's note), so the webhook writes the repository full name as a
+   placeholder project identifier. The resolver produces richer profiles but
+   persisting `ProjectProfile` is deferred (per Task C: no DB wiring yet).
+3. **Naive-UTC datetime convention in the DB layer.** SQLite cannot round-trip
+   timezone offsets, and the audit hash chain requires byte-stable
+   `created_at.isoformat()` values. All DB-layer datetimes are therefore
+   naive-UTC by convention; the application layer treats them as UTC.
+   Documented in `db/models.py`.
+4. **`identity_policy.yaml` now ships a scoped example allowlist**
+   (`example-org/*`, branches `main`/`release/*`/`feature/*`) replacing Batch
+   1's empty defaults, so the ingress is functional out of the box. This
+   supersedes the Batch 1 NOTES bullet ("empty allowlists are intentional") —
+   deny-by-default is preserved for anything not matching the globs.
+   Operators must scope this file before real deployment.
+5. **`RequirementsResolver.resolve()` gained an optional `policy_version`
+   keyword.** The spec's `ProjectProfile.policy_version_pinned` needs a
+   source; when omitted it defaults to `load_org_policy_version()` (a new
+   governance loader helper verifying all 7 policy files agree on one
+   version). Purity kept: file reads only, no DB/HTTP.
+6. **Intake answer shape**: answers may be flat (`{question_id: value}`) or
+   nested by section id; both are normalized. An empty list is a VALID answer
+   for `string_list` questions (an empty allowlist is deny-by-default, not an
+   omission) but counts as "unanswered" for scalar questions.
+7. **Webhook error mapping**: unsupported event → 400 `unsupported_event`;
+   malformed JSON / missing delivery header / undeterminable branch or SHA →
+   400 `payload_invalid` (justified by Section 4.2 "Validate ... source
+   revision" + rejections-are-auditable). Duplicate delivery → HTTP 200
+   idempotent with `duplicate_rejected` audit (spec/Section 10). Branch
+   allow-list applies to both supported events (head ref for PRs, `ref` for
+   push).
+8. **Local env auto-creates tables.** In `CI_AGENT_ENV=local` the app runs
+   `Base.metadata.create_all` at startup for dev ergonomics; real deployments
+   use `alembic upgrade head` (see README). Alembic is exercised by a
+   dedicated migration test plus manual run.
+9. **Extra test directory** `tests/unit/test_db/` for the Alembic migration
+   test (the spec requires a dedicated migration test; this keeps db tests
+   grouped).
+10. **Dev webhook secret constant** `LOCAL_DEV_WEBHOOK_SECRET` is the
+    documented local-only fallback (also in `.env.example`); dev/prod fail
+    startup loudly without `GITHUB_WEBHOOK_SECRET` (tested).
+11. **`RUN_STATUS_ACCEPTED`** is the initial run status ("free string
+    constrained at app layer" per the spec; the state machine arrives later).
+
+## Verification evidence (manual DoD flow, run against uvicorn on :8000)
+
+```
+healthz:          200 {"status": "ok"}
+signed webhook:   202 {"run_id": "3d28e409-...", "status": "accepted"}
+replay:           200 {"detail": "duplicate delivery, ignored"}
+tampered sig:     401 {"detail": "invalid signature"}
+RunRecord:        3d28e409-... example-org/payments-api push cafe5678abcd accepted
+audit trail:      [('webhook_received', 'GENESIS'), ('run_created', 'c813f4e9f9f0')]
+verify_chain:     True
+delivery marked:  True
+```
