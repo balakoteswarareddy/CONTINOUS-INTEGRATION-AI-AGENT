@@ -227,6 +227,11 @@ class PhaseAOrchestrator:
             assert persisted is not None, f"run {run_id!r} vanished mid-dispatch"
             persisted.dispatch_branch = dispatch_ref.branch
             persisted.external_run_id = dispatch_ref.external_run_id
+            # Batch 8: which adapter owns this run (multi-runner routing +
+            # webhook resolution). None-safe for older DispatchRef shapes.
+            provider = getattr(dispatch_ref, "provider", None)
+            if provider:
+                persisted.runner_provider = str(provider)
             session.commit()
         self._audit(run_id, "run_dispatched", {"dispatch_branch": dispatch_ref.branch})
         return {"state": RunState.TRIGGER_VALIDATED.value, "dispatched": True}

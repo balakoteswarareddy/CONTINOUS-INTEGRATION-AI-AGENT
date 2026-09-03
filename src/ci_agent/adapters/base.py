@@ -49,6 +49,11 @@ class DispatchRef(BaseModel):
     # may resolve it asynchronously after dispatch.
     external_run_id: str | None = None
     workflow_ref: str | None = None
+    # Batch 8: which adapter produced this dispatch (github_actions |
+    # gitlab_ci | jenkins) — the orchestrator persists it on the run so
+    # webhooks and reconciliation resolve the right provider. Vendor-neutral:
+    # a registry key, never provider-specific types.
+    provider: str | None = None
     dispatched_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 

@@ -1,10 +1,10 @@
-# Provider support matrix (Batch 1, Task C).
-#
-# Supported providers today. Intentionally minimal — grows in later batches as
-# adapters are implemented (Report Section 5/8 provider abstraction).
-version: "1.0.0"
+# Provider support matrix (Batch 1, Task C; extended by Batch 8 — Multi-Runner
+# Scale). Runner providers map 1:1 to implemented RunnerAdapters; anything not
+# listed is refused (vendor neutrality, Section 12 — adapters, not vendor
+# logic in the control plane).
+version: "1.1.0"
 scm_providers: [github]
-runner_providers: [github_actions]
+runner_providers: [github_actions, gitlab_ci, jenkins]
 security_tool_providers: []
 artifact_registries: []
 secrets_providers: []

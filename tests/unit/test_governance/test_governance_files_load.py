@@ -68,9 +68,9 @@ class TestLoadProviderMatrix:
     def test_loads_minimal_provider_matrix(self) -> None:
         data = loader.load_provider_matrix()
 
-        assert data["version"] == "1.0.0"
+        assert data["version"] == "1.1.0"  # Batch 8: runner_providers added
         assert data["scm_providers"] == ["github"]
-        assert data["runner_providers"] == ["github_actions"]
+        assert data["runner_providers"] == ["github_actions", "gitlab_ci", "jenkins"]
         assert data["security_tool_providers"] == []
         assert data["artifact_registries"] == []
         assert data["secrets_providers"] == []
