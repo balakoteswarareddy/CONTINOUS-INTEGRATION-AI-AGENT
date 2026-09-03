@@ -50,6 +50,12 @@ from ci_agent.reliability.concurrency_guard import ConcurrencyGuard
 # Check Run name carrying the published merge decision (Section 5.1 stage 10).
 MERGE_DECISION_CHECK_NAME = "ci-agent merge decision"
 
+# Fallback mirrors the governed approval_policy.yaml (require_human_approval_for).
+# create_app passes the LIVE PolicySpec list; tests may pass their own.
+DEFAULT_REQUIRE_HUMAN_APPROVAL_FOR: frozenset[RiskTier] = frozenset(
+    {RiskTier.HIGH, RiskTier.REGULATED}
+)
+
 # Tool stage id -> the run state its SUCCESS produces.
 STAGE_TO_RUN_STATE: dict[str, RunState] = {
     "checkout": RunState.CHECKED_OUT,
@@ -103,6 +109,7 @@ class PhaseAOrchestrator:
         github_client: Any,
         concurrency_guard: ConcurrencyGuard,
         policy_spec_version: str,
+        require_human_approval_for: frozenset[RiskTier] = DEFAULT_REQUIRE_HUMAN_APPROVAL_FOR,
     ) -> None:
         self._audit_store = audit_store
         self._session_factory = session_factory
@@ -113,6 +120,10 @@ class PhaseAOrchestrator:
         self._github = github_client
         self._guard = concurrency_guard
         self._policy_version = policy_spec_version
+        # Batch 5.1 (Item 3): risk tiers requiring human approval come from
+        # PolicySpec.approval_policy.require_human_approval_for — never
+        # hardcoded at the call site.
+        self._require_human_approval_for = require_human_approval_for
 
     # ------------------------------------------------------------------ public
 
@@ -321,22 +332,52 @@ class PhaseAOrchestrator:
             self._release_guard(run.project_id)
             return {"state": RunState.FAILED.value, "reason": "policy_gate rejected"}
 
-        if self._approval_required(profile):
-            reason = f"risk tier {profile.risk_tier.value} requires human approval"
+        approval_required, approval_triggers = self._approval_triggers(profile, spec)
+        if approval_required:
+            # Batch 5.1 (Item 3): record WHICH trigger(s) caused the approval
+            # requirement (Section 18 reconstructability) — structured audit
+            # event + human-readable transition reason, both dual-written.
+            reason = "human approval required by: " + ", ".join(approval_triggers)
             self._transition(
                 run_id,
                 RunState.POLICY_GATE_EVAL,
                 RunState.AWAITING_APPROVAL,
                 reason=reason,
             )
-            return {"state": RunState.AWAITING_APPROVAL.value}
+            self._audit(run_id, "approval_required", {"triggers": approval_triggers})
+            return {"state": RunState.AWAITING_APPROVAL.value, "triggers": approval_triggers}
 
         self._transition(run_id, RunState.POLICY_GATE_EVAL, RunState.APPROVED)
         return self._finish(run_id, approved=True, approver="policy:auto-approve")
 
-    def _approval_required(self, profile: Any) -> bool:
-        """Deterministic MVP rule: high risk tier requires a human approval."""
-        return profile.risk_tier is RiskTier.HIGH
+    def _approval_triggers(self, profile: Any, spec: PipelineSpec) -> tuple[bool, list[str]]:
+        """Combined approval rule (Batch 5.1 Item 3).
+
+        Human approval is required when EITHER:
+          * the project profile's risk tier is listed in
+            ``PolicySpec.approval_policy.require_human_approval_for``
+            (org-level, policy-driven — Batch 5's hardcoded ``== "high"``
+            check generalized), OR
+          * ``PipelineSpec.approvals_required`` is True
+            (pipeline-level explicit requirement, Section 4.1).
+
+        Both signals are first-class and ADDITIVE: either one alone is
+        sufficient, and neither can "cancel out" the other. The returned
+        trigger strings (e.g. ``risk_tier:high``,
+        ``pipeline_spec.approvals_required``) go to the audit trail so the
+        compliance report can reconstruct why a run needed approval.
+        """
+        triggers: list[str] = []
+        tier = (
+            profile.risk_tier.value
+            if isinstance(profile.risk_tier, RiskTier)
+            else str(profile.risk_tier)
+        )
+        if profile.risk_tier in self._require_human_approval_for:
+            triggers.append(f"risk_tier:{tier}")
+        if spec.approvals_required:
+            triggers.append("pipeline_spec.approvals_required")
+        return bool(triggers), triggers
 
     # ----------------------------------------------------------- approval path
 

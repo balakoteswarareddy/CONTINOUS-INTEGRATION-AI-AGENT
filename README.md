@@ -85,6 +85,27 @@ cp .env.example .env   # optional; sensible local defaults apply
 | `GITHUB_WEBHOOK_SECRET` | dev default in `local` only | **Required in dev/prod — startup fails loudly without it** |
 | `OPA_URL` | `http://localhost:8181` | OPA REST endpoint (Batch 3) |
 | `OPA_TIMEOUT_SECONDS` | `5` | Policy evaluation timeout (Section 10) |
+| `ADMIN_API_KEY` | dev default in `local` only | **Required in dev/prod — admin API auth (Batch 5)** |
+| `MAX_CONCURRENT_RUNS_PER_PROJECT` | `3` | In-flight dispatch quota per project |
+
+## Identity policy: deny-by-default + local-dev override
+
+The committed
+[`governance` identity policy](src/ci_agent/governance/catalog/policies/identity_policy.yaml)
+ships with **EMPTY** `allowed_repositories` / `allowed_branches` — a true
+deny-by-default posture (Section 7): in `dev`/`prod`, every webhook for an
+unconfigured repository is rejected with an audited 403, and `plan_approval`
+fails closed. **You must explicitly configure these allowlists for your
+environment before onboarding real repositories.**
+
+A working example allowlist (`example-org/*`, `main`, `release/*`,
+`feature/*`) lives in
+`src/ci_agent/governance/catalog/policies/examples/identity_policy.local-dev.yaml`.
+It is loaded ONLY when `CI_AGENT_ENV=local` (with a loud startup warning,
+"⚠ Using LOCAL-DEV identity policy override — do not use in shared/prod
+environments"). Never copy it into a shared/deployed environment as-is.
+`scripts/validate_governance.py` FAILS if the committed policy ever becomes
+permissive again, and validates the example file against the policy schema.
 
 ## Run the tests
 

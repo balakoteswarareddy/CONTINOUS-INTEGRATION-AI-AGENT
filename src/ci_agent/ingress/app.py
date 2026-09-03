@@ -122,6 +122,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         github_client=github_client,
         concurrency_guard=concurrency_guard,
         policy_spec_version=policy_spec.policy_version,
+        require_human_approval_for=frozenset(
+            policy_spec.approval_policy.require_human_approval_for
+        ),
     )
     observer_events.on_stage_transition = orchestrator.on_stage_transition
     evidence_assembler = EvidenceAssembler(session_factory, audit_store)

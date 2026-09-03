@@ -139,6 +139,9 @@ def env(tmp_path):
         github_client=github,  # type: ignore[arg-type]
         concurrency_guard=ConcurrencyGuard(3),
         policy_spec_version=policy_spec.policy_version,
+        require_human_approval_for=frozenset(
+            policy_spec.approval_policy.require_human_approval_for
+        ),
     )
     observer = ExecutionObserver(session_factory, audit_store)
     return {

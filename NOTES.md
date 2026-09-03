@@ -416,3 +416,145 @@ respx-mocked client tests and adapter unit tests.
     not yet route every call through them (retries are active on both
     external clients); completing breaker wrapping of every GitHubClient
     method is a small hardening follow-up.
+
+---
+
+# Batch 5.1 Notes — MVP Hardening Close-out (Pre-Sign-off Fixes)
+
+## ITEM 1 — Real GitHub end-to-end test: **BLOCKED (credentials), with probe evidence**
+
+The batch forbids fabricating this item, so here is the precise blocker.
+
+**What was probed (2026-09-03, `gh` CLI + GitHub REST from this sandbox):**
+- Sandbox auth exists: `gh auth status` reports a `GH_TOKEN` for
+  `arena-ai-coding-agent[bot]` — but it is a GitHub **App installation token**,
+  not a user PAT.
+- `GET /user` → 403; `GET /user/repos` → 403 (cannot even list repos).
+- `GET /repos/balakoteswarareddy/CONTINOUS-INTEGRATION-AI-AGENT` → the
+  installation sees exactly ONE repo, with
+  `permissions: {admin:false, maintain:false, push:false, pull:false,
+  triage:false}` (contents read via git push happens through a separate
+  pre-configured git credential path; the REST API grants nothing writable).
+- `POST /repos/.../check-runs` (Checks:write probe) → **403** "Resource not
+  accessible by integration".
+- `POST /repos/.../actions/workflows/x/dispatches` (Actions:write probe) →
+  **403**.
+- `gh repo create ci-agent-e2e-probe` (repo creation probe) → **403**
+  (GraphQL `createRepository` not accessible).
+
+Conclusion: this token can **read** public API metadata of the one bound repo
+but cannot create repositories, push workflow dispatches, or create check runs
+— every capability the real E2E requires. Running the flow against a repo we
+cannot write to is impossible, and mocking it would violate the batch rules.
+
+**What is needed from you (either option):**
+1. A fine-grained or classic **PAT** with at least: `repo` (or
+   Contents+Pull-requests+Checks+Administrative read for a private repo) and
+   **`workflow`** scope, plus permission to create one disposable private
+   repository; then export per README Batch 4/5 sections:
+   - `GITHUB_PAT=<token>`
+   - `CI_AGENT_TEST_REPO=<owner>/<disposable-repo>`
+   - (GitHub App vars remain optional — PAT is the documented MVP fallback.)
+2. OR: create the disposable repository yourself and provide a PAT/APP
+   credential pair scoped to it.
+
+The moment credentials exist: the existing
+`tests/integration/test_github_actions_dispatch.py` (pass + deliberately
+failing-stage scenarios) runs unmodified, plus the manual flow documented in
+README (signed webhook → dispatch → observer/reconciliation mid-flight →
+policy gate → merge-decision Check Run → compliance report + `verify_chain`).
+Everything up to the GitHub boundary is already exercised by real-OPA
+integration tests; only the last mile needs the credential.
+
+## ITEM 2 — Identity policy deny-by-default: **DONE**
+
+1. Committed `src/ci_agent/governance/catalog/policies/identity_policy.yaml`
+   reverted to EMPTY `allowed_repositories` / `allowed_branches` (true
+   deny-by-default, Section 7). Batch 2's convenience allowlist is gone from
+   the shipped default.
+2. The example moved verbatim to
+   `catalog/policies/examples/identity_policy.local-dev.yaml` with a loud
+   header ("LOCAL DEVELOPMENT OVERRIDE — NEVER USE IN SHARED/PROD").
+3. Loader gained `load_identity_policy(local_dev_override)` and
+   `load_policy_spec(local_dev_override)` (only the identity family swaps).
+   `create_app` loads the override ONLY for `CI_AGENT_ENV=local` and logs
+   `⚠ Using LOCAL-DEV identity policy override ... do not use in shared/prod
+   environments` at WARNING level; dev/prod always get the committed file.
+4. Tests switched from implicit-permissive-production to explicit local-dev
+   override (`live_pdp` fixture, Phase A flow fixture) or inline fixtures.
+5. README documents the split ("committed default policy = deny everything;
+   configure allowlists per environment before onboarding").
+6. `scripts/validate_governance.py` now (a) validates the example file, and
+   (b) FAILS if the committed identity policy ever ships non-empty
+   allowlists again — a permanent regression guard.
+7. New tests: committed default empty; override file separate & permissive;
+   spec override swaps identity family only; local app loads override +
+   warning logged; dev app no warning + empty lists; **dev-mode webhook for
+   an allowlist-shaped repo is rejected 403** (deny-everything proof);
+   local-mode accepts `example-org/*` but still rejects `rogue-org/*`.
+
+## ITEM 3 — Combined approval rule: **DONE**
+
+Rule (documented in `PhaseAOrchestrator._approval_triggers`):
+`approval_required = (profile.risk_tier in
+PolicySpec.approval_policy.require_human_approval_for) OR
+(PipelineSpec.approvals_required)`. Both signals are first-class and
+ADDITIVE — either alone is sufficient; neither can cancel the other.
+
+- The Batch 5 hardcoded `== "high"` check is gone: `create_app` passes
+  `frozenset(policy_spec.approval_policy.require_human_approval_for)` (the
+  governed catalog currently lists `high, regulated`); the constructor
+  default only mirrors that governed value for standalone tests.
+- WHY-recording: the `AWAITING_APPROVAL` transition carries a human-readable
+  reason (`human approval required by: risk_tier:high,
+  pipeline_spec.approvals_required`) AND a structured `approval_required`
+  audit event with `{"triggers": [...]}` — the compliance package includes
+  both via the audit trail (Section 18 reconstructability). The advance
+  result also returns `triggers`.
+- Tests (all passing, `tests/unit/test_orchestrator/test_approval_rule.py`):
+  the five documented cases — high+false (risk_tier trigger), low+true
+  (pipeline_spec trigger), low+false (auto-approve, no approval event),
+  high+true (both triggers, both in the transition reason) — plus
+  policy-list-with-medium → medium risk now requires approval, and the
+  corollary (medium NOT in list → auto-approve).
+
+## ITEM 4 — `RunRecord.status` vs `current_state`: **DONE (option a — DEPRECATE)**
+
+Investigation findings (before any change):
+- `status` was written exactly ONCE per run — `AuditStore.create_run` set
+  `RUN_STATUS_ACCEPTED` ("accepted") and the ORM column default repeated it.
+  NO code path ever updated it afterwards (Batch 5's orchestrator writes only
+  `current_state`).
+- Read paths: `GET /runs/{run_id}` (`"status": run.status`) and `__repr__`.
+  (The `record.status` in report_models is `StageExecutionRecord.status` — a
+  different, unrelated column.)
+- So no active drift existed, but the exposed field was meaningless after
+  creation ("accepted" forever) — misleading rather than corrupt.
+
+Choice: **(a) DEPRECATE** — smallest, safest change; no migration, no
+generated-column complexity, existing rows/tests unaffected.
+- `status` column retained for backward compatibility, marked DEPRECATED in
+  models.py (doc + comment); the explicit `status=` write removed from
+  `create_run` (the ORM insert default remains the single legacy write; no
+  code path updates it afterwards — frozen at "accepted").
+- New `run_status_from_state(current_state)` in db/models.py is the ONLY
+  sanctioned status vocabulary for display: None→"accepted",
+  in-flight states→"in_progress", awaiting_approval/approved/rejected
+  pass through, merge_decision_published→"published", failed/error pass
+  through, unknown value→"error" (fail-closed). `GET /runs/{run_id}` now
+  derives `status` from it (response semantics documented in the docstring;
+  `current_state` remains in the response).
+- Tests (`test_run_status_alignment.py`): mapping total over all 14 states +
+  None; unknown state → "error"; a run driven through
+  created→in-flight→published asserts at EVERY step that the legacy column is
+  frozen while the derived status tracks current_state (and actually moves);
+  an API test mutates current_state and shows the response `status` follows
+  it while the stored column stays "accepted" — no drift is possible because
+  nothing reads or writes the legacy column anymore.
+
+## Batch 5.1 gate results
+
+- Full suite: **441 passed, 1 skipped** (live-credential dispatch test; OPA
+  live) — all prior batches still green.
+- `ruff check .` clean; `black --check` clean; `mypy` clean;
+  `scripts/validate_governance.py` 11/11 + deny-by-default guard PASS.

@@ -19,7 +19,6 @@ from sqlalchemy.orm import Session, sessionmaker
 from ci_agent.core.models.common import EventType
 from ci_agent.db.models import (
     GENESIS_PREV_HASH,
-    RUN_STATUS_ACCEPTED,
     AuditLogEntry,
     ProcessedDelivery,
     RunRecord,
@@ -71,7 +70,9 @@ class AuditStore:
             repository=repository,
             trigger_type=trigger_type,
             source_sha=source_sha,
-            status=RUN_STATUS_ACCEPTED,
+            # status is the DEPRECATED insert-only column (Batch 5.1 Item 4):
+            # intentionally not set here — the ORM default applies, and no
+            # code path ever updates it afterwards.
             created_at=now,
             updated_at=now,
         )

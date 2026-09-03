@@ -26,8 +26,13 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from ci_agent.db.base import Base
 
-# Application-layer status vocabulary for RunRecord.status (free string column
-# per Batch 2 spec; constrained here until the state machine lands).
+# Legacy single-value vocabulary for RunRecord.status (Batch 2).
+# DEPRECATED (Batch 5.1, Item 4): `RunRecord.current_state` (RunState enum) is
+# the single source of truth for pipeline position. `status` exists ONLY for
+# backward compatibility with pre-Batch-5 rows/tests; it is written once by
+# the ORM insert default below and NEVER updated by any code path. All
+# external-facing display derives from current_state via
+# run_status_from_state(). Do not read or write `status` in new code.
 RUN_STATUS_ACCEPTED: Final[str] = "accepted"
 
 # Marker used as prev_hash for the first audit entry of each run.
@@ -51,7 +56,9 @@ class RunRecord(Base):
     # Value drawn from ci_agent.core.models.common.EventType.
     trigger_type: Mapped[str] = mapped_column(String(32))
     source_sha: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    # Free string for now; values constrained at the application layer.
+    # DEPRECATED (Batch 5.1, Item 4 — see RUN_STATUS_ACCEPTED note above):
+    # legacy insert-only column, frozen at "accepted"; the authoritative
+    # pipeline position is `current_state` (RunState). Never updated.
     status: Mapped[str] = mapped_column(String(32), default=RUN_STATUS_ACCEPTED)
     created_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow, onupdate=utcnow)
@@ -69,7 +76,40 @@ class RunRecord(Base):
     pipeline_spec_ref: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
-        return f"<RunRecord run_id={self.run_id!r} status={self.status!r}>"
+        return f"<RunRecord run_id={self.run_id!r} current_state={self.current_state!r}>"
+
+
+# Batch 5.1 (Item 4): the ONLY sanctioned status vocabulary for external
+# display, derived from current_state. None (run created, orchestration has
+# not advanced it yet) maps to the legacy "accepted". An unrecognized state
+# value maps fail-closed to "error" rather than pretending progress.
+_RUN_STATE_TO_STATUS: dict[str, str] = {
+    "trigger_validated": "in_progress",
+    "checked_out": "in_progress",
+    "baseline_validated": "in_progress",
+    "linted": "in_progress",
+    "sast_done": "in_progress",
+    "tests_done": "in_progress",
+    "security_checked": "in_progress",
+    "policy_gate_eval": "in_progress",
+    "awaiting_approval": "awaiting_approval",
+    "approved": "approved",
+    "rejected": "rejected",
+    "merge_decision_published": "published",
+    "failed": "failed",
+    "error": "error",
+}
+
+
+def run_status_from_state(current_state: str | None) -> str:
+    """Derive the external-facing run status from the authoritative state.
+
+    Single mapping used by every display/API surface so `status` and
+    `current_state` cannot disagree by construction (Batch 5.1 Item 4).
+    """
+    if current_state is None:
+        return RUN_STATUS_ACCEPTED
+    return _RUN_STATE_TO_STATUS.get(current_state, "error")
 
 
 class AuditLogEntry(Base):

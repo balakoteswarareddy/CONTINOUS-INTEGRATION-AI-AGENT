@@ -12,6 +12,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 
 from ci_agent.core.models.common import RiskTier
+from ci_agent.db.models import run_status_from_state
 from ci_agent.projects.project_registry import (
     ProjectNotRegisteredError,
     ProjectRegistry,
@@ -49,7 +50,9 @@ def get_run(run_id: str, request: Request, response: Response) -> dict[str, Any]
         "repository": run.repository,
         "trigger_type": run.trigger_type,
         "source_sha": run.source_sha,
-        "status": run.status,
+        # Batch 5.1 (Item 4): derived from current_state (single source of
+        # truth); the legacy RunRecord.status column is deprecated and frozen.
+        "status": run_status_from_state(run.current_state),
         "current_state": run.current_state,
         "dispatch_branch": run.dispatch_branch,
         "external_run_id": run.external_run_id,
