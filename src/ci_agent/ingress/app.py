@@ -20,6 +20,8 @@ from ci_agent.db.base import Base, create_engine, get_session_factory
 from ci_agent.governance import load_policy_file
 from ci_agent.ingress import github_webhook
 from ci_agent.ingress.replay_guard import ReplayGuard
+from ci_agent.observer.execution_observer import ExecutionObserver
+from ci_agent.observer.github_events import ObserverEventHandlers
 
 
 def _load_allowlists() -> tuple[list[str], list[str]]:
@@ -42,6 +44,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     engine = create_engine(resolved_settings.database_url)
     audit_store = AuditStore(get_session_factory(engine))
     replay_guard = ReplayGuard(audit_store)
+    observer = ExecutionObserver(get_session_factory(engine), audit_store)
+    observer_events = ObserverEventHandlers(observer, audit_store, get_session_factory(engine))
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -62,6 +66,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.state.webhook_secret = webhook_secret
     application.state.audit_store = audit_store
     application.state.replay_guard = replay_guard
+    application.state.observer = observer
+    application.state.observer_events = observer_events
     application.state.allowed_repositories = allowed_repositories
     application.state.allowed_branches = allowed_branches
 

@@ -250,3 +250,79 @@ checkout.git -> format_lint.ruff -> sast.bandit -> unit_tests.pytest
   -> policy_gate.internal.policy_gate -> human_approval.internal.human_approval
   -> merge_decision.internal.merge_decision
 ```
+
+---
+
+# Batch 4 Notes — Runner Adapter (GitHub Actions) & Execution Observer
+
+## Deviations & decisions
+
+1. **Jobs-per-stage workflow compilation.** The batch offered "one job per
+   stage" or "steps within a single job" and leaned single-job for MVP, but
+   Task B requires mapping `check_run` webhook events to individual stage
+   transitions — GitHub emits one Check Run per JOB. We therefore compile one
+   job per stage (id `stage-<stage_id>`, name `<stage_id>` so
+   `check_run.name == stage_id`), wired via `needs:` from
+   `ResolvedStep.depends_on`. Documented here as the deliberate choice.
+2. **`ResolvedStep.depends_on` added** (Batch 1 model, defaulted, backwards
+   compatible): adapters need the dependency graph to build `needs:`; the
+   Planner now populates it from PipelineSpec stages.
+3. **`RunnerAdapter.compile` accepts optional generic `metadata`** (target
+   repository, source revision): an ExecutionPlan deliberately carries no
+   dispatch coordinates, but dispatch needs them. Keys are generic strings —
+   no vendor types in the seam.
+4. **Command template ids** follow our Batch 3 templates (`lint.ruff`,
+   `tests.pytest`, `scan.pip-audit`, `scan.npm-audit`, ...). The batch's
+   example list used different ids (`unit_tests.pytest`,
+   `dependency_scan.pip_audit`); our canonical ids are the ones the Batch 3
+   templates actually reference, and a test enforces every template id is
+   allow-listed. `checkout.default: null` = native pinned `actions/checkout@v4`.
+   Gate stages (`internal.*`) never consult the registry (control-plane
+   orchestrated placeholder jobs).
+5. **workflow_dispatch chosen over push triggers** for explicit control and
+   idempotent re-dispatch; the compiled workflow's `on:` is
+   `workflow_dispatch` only, `permissions: contents: read` (least privilege —
+   the merge decision is posted via the adapter's own credential, not the
+   runner's token).
+6. **Run-id resolution** after `workflow_dispatch` uses a bounded retry
+   (5 attempts, linear backoff) against `GET /actions/runs?branch=`; returns
+   `None` (recorded) if unresolved rather than failing the dispatch.
+7. **check_run → run correlation**: GitHub's check_run payload has no branch,
+   so runs are matched by `RunRecord.source_sha == check_run.head_sha`
+   (most recent dispatched run). Limitation: two simultaneous dispatches from
+   the same sha could correlate ambiguously; branch-based correlation is used
+   for workflow_run events, which carry `head_branch`. Documented as an MVP
+   simplification.
+8. **Observer pseudo-stage `workflow`**: workflow_run events record overall
+   run status under stage_id `workflow` (plus updating nothing else). Unmatched
+   observer events are audited under synthetic run id `observer:unmatched`.
+9. **First-write-wins transitions**: the monotonic transition table is
+   enforced on UPDATES; a record's first write may land directly on a terminal
+   status (reconciliation observes terminal states without intermediates).
+   Same-status re-record is an idempotent no-op; rejections are audited
+   (`stage_transition_rejected`) and raise `InvalidStageTransitionError`.
+10. **Reconciliation** prefers the structured `ci-agent-results` artifact
+    (zip -> JSON parsed), falls back to check-run statuses, then to the
+    overall workflow status on the `workflow` pseudo-stage. Racing webhook
+    conflicts are counted, not raised. CLI: `python -m
+    ci_agent.observer.reconciliation --run-id <id>`; scheduler wiring is a
+    deployment concern.
+11. **Credentials**: PAT passthrough (MVP fallback) or GitHub App JWT ->
+    installation-token exchange (pyjwt + cryptography, token cached with a
+    safety margin). Only a redacted indicator is ever logged. Full
+    OIDC/workload-identity hardening of this credential (Section 7.2) is
+    deferred to pre-production hardening.
+12. **Observer endpoint response**: observer events return an explicit 200
+    (the route's declared 202 is for run creation); duplicate observer
+    deliveries stay idempotent 200 with `duplicate_rejected` audit.
+13. Integration test `test_github_actions_dispatch.py` requires real
+    credentials + `CI_AGENT_TEST_REPO` and otherwise skips; it was NOT run
+    here (no live credentials in this environment) — see README for the
+    exact manual procedure.
+
+## Manual dispatch test status
+
+Not executed: no GitHub credentials are available in this sandbox. The test
+is wired to run for real when `GITHUB_PAT` (or App vars) and
+`CI_AGENT_TEST_REPO` are exported; all logic paths around it are covered by
+respx-mocked client tests and adapter unit tests.

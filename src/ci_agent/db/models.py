@@ -21,7 +21,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Final
 
-from sqlalchemy import DateTime, String, Text
+from sqlalchemy import DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ci_agent.db.base import Base
@@ -55,6 +55,12 @@ class RunRecord(Base):
     status: Mapped[str] = mapped_column(String(32), default=RUN_STATUS_ACCEPTED)
     created_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow, onupdate=utcnow)
+    # --- Batch 4 additions (runner adapter dispatch tracking) ---------------
+    # Convention: "ci-agent/<run_id>" — used by the Execution Observer to map
+    # workflow_run/check_run webhooks back to the run (Report Section 4.2).
+    dispatch_branch: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # GitHub's workflow run id once resolved after workflow_dispatch.
+    external_run_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return f"<RunRecord run_id={self.run_id!r} status={self.status!r}>"
@@ -99,3 +105,40 @@ class ProcessedDelivery(Base):
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return f"<ProcessedDelivery delivery_id={self.delivery_id!r}>"
+
+
+class StageExecutionRecord(Base):
+    """Observed execution state of one pipeline stage within a run (Batch 4, Stage 10).
+
+    Section 10: "Represent pipeline state explicitly; do not infer final state
+    from free-form logs." One row per (run_id, stage_id) — writes are
+    idempotent and transitions are monotonic (ExecutionObserver enforces the
+    allowed-transition table; Report Section 7.3 state-confusion control).
+
+    ``logs_ref`` is a pointer/URL, never a full log blob. ``findings_ref`` is
+    reserved for Batch 6 (security adapters) — the column exists now so no
+    migration redesign is needed later.
+    """
+
+    __tablename__ = "stage_execution_records"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(String(64), ForeignKey("run_records.run_id"), index=True)
+    stage_id: Mapped[str] = mapped_column(String(64), index=True)
+    # Value drawn from ci_agent.core.models.common.StageStatus.
+    status: Mapped[str] = mapped_column(String(32))
+    exit_code: Mapped[int | None] = mapped_column(nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(), nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(nullable=True)
+    logs_ref: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    # Reserved for Batch 6 (normalized findings pointer); intentionally nullable now.
+    findings_ref: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow, onupdate=utcnow)
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return (
+            f"<StageExecutionRecord run_id={self.run_id!r} stage_id={self.stage_id!r} "
+            f"status={self.status!r}>"
+        )

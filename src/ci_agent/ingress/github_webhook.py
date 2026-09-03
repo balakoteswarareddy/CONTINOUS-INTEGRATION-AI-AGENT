@@ -13,7 +13,8 @@ import json
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 
 from ci_agent.core.models.common import EventType
 from ci_agent.ingress.signature import verify_signature
@@ -21,6 +22,13 @@ from ci_agent.ingress.signature import verify_signature
 router = APIRouter(tags=["webhooks"])
 
 SUPPORTED_EVENTS: frozenset[str] = frozenset({EventType.PULL_REQUEST.value, EventType.PUSH.value})
+
+# Batch 4: runner-status events handled by the Execution Observer on this same
+# endpoint (same signature verification, replay guard and allowlists).
+OBSERVER_EVENTS: frozenset[str] = frozenset({"workflow_run", "check_run"})
+
+# Synthetic run id for audit entries of observer events that matched no run.
+UNMATCHED_RUN_ID = "observer:unmatched"
 
 # Event name recorded in the audit trail for pre-run rejections. These happen
 # before a run exists, so they chain under a synthetic run id derived from the
@@ -112,8 +120,80 @@ def _rejection_event_name(event_type: str) -> str:
     }.get(event_type, "request_rejected")
 
 
+def _handle_observer_event(
+    request: Request, event_type: str, payload: dict[str, Any], delivery_id: str
+) -> JSONResponse:
+    """Process a workflow_run / check_run event through the Execution Observer.
+
+    Order mirrors the run-creation flow: replay guard (idempotent 200 on
+    duplicates), repository allow-list, handler, mark delivery processed.
+    """
+    state = request.app.state
+    handlers = state.observer_events
+    repository_full_name = str(((payload.get("repository") or {}).get("full_name")) or "")
+
+    if state.replay_guard.is_duplicate(delivery_id):
+        raise _reject(
+            request,
+            _rejection_run_id(delivery_id),
+            "duplicate",
+            200,
+            "duplicate delivery, ignored",
+            {
+                "delivery_id": delivery_id,
+                "repository": repository_full_name,
+                "event": event_type,
+            },
+        )
+    if not repository_full_name or not _glob_allows(
+        state.allowed_repositories, repository_full_name
+    ):
+        raise _reject(
+            request,
+            _rejection_run_id(delivery_id),
+            "repository",
+            403,
+            f"repository {repository_full_name!r} is not allowed",
+            {
+                "delivery_id": delivery_id,
+                "repository": repository_full_name,
+                "event": event_type,
+            },
+        )
+
+    correlated: str | tuple[str, str] | None
+    if event_type == "workflow_run":
+        correlated = handlers.handle_workflow_run(payload)
+    else:
+        correlated = handlers.handle_check_run(payload)
+
+    if correlated is None:
+        observed_run_id = None
+    elif isinstance(correlated, str):
+        observed_run_id = correlated
+    else:
+        observed_run_id = correlated[0]
+    if observed_run_id:
+        state.replay_guard.mark_processed(delivery_id, observed_run_id)
+    else:
+        state.replay_guard.mark_processed(delivery_id, _rejection_run_id(delivery_id))
+    state.audit_store.append_event(
+        observed_run_id or UNMATCHED_RUN_ID,
+        "observer_event_received",
+        {
+            "event": event_type,
+            "delivery_id": delivery_id,
+            "repository": repository_full_name,
+            "matched": correlated is not None,
+        },
+    )
+    # Explicit 200: the route's declared default is 202 (run creation), which
+    # must not leak onto observer acknowledgements.
+    return JSONResponse(status_code=200, content={"status": "observed", "event": event_type})
+
+
 @router.post("/webhooks/github", status_code=202)
-async def github_webhook(request: Request) -> dict[str, str]:
+async def github_webhook(request: Request) -> Response:
     """Receive and validate a GitHub webhook, then issue a run ID.
 
     Validation order (each step short-circuits):
@@ -168,6 +248,12 @@ async def github_webhook(request: Request) -> dict[str, str]:
         raise _reject(
             request, _rejection_run_id(delivery_id), "payload", 400, "body must be a JSON object"
         )
+
+    # --- Event-type dispatch (Batch 4): observer events flow to the Execution
+    # Observer on the SAME endpoint, reusing signature/replay/allowlist/audit.
+    if event_header in OBSERVER_EVENTS:
+        return _handle_observer_event(request, event_header, payload, delivery_id)
+
     try:
         fields = extract_event_fields(event_header, payload)
     except ValueError as exc:
@@ -252,4 +338,4 @@ async def github_webhook(request: Request) -> dict[str, str]:
     )
 
     # 11. Accepted.
-    return {"run_id": run_id, "status": "accepted"}
+    return JSONResponse(status_code=202, content={"run_id": run_id, "status": "accepted"})

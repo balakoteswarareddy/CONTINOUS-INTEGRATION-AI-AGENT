@@ -22,6 +22,11 @@ DEFAULT_DATABASE_URL: str = "sqlite:///./ci_agent.db"
 
 GITHUB_WEBHOOK_SECRET_VARIABLE: str = "GITHUB_WEBHOOK_SECRET"
 
+GITHUB_PAT_VARIABLE: str = "GITHUB_PAT"
+GITHUB_APP_ID_VARIABLE: str = "GITHUB_APP_ID"
+GITHUB_APP_PRIVATE_KEY_PATH_VARIABLE: str = "GITHUB_APP_PRIVATE_KEY_PATH"
+GITHUB_INSTALLATION_ID_VARIABLE: str = "GITHUB_INSTALLATION_ID"
+
 OPA_URL_VARIABLE: str = "OPA_URL"
 DEFAULT_OPA_URL: str = "http://localhost:8181"
 OPA_TIMEOUT_VARIABLE: str = "OPA_TIMEOUT_SECONDS"
@@ -40,6 +45,10 @@ class Settings:
     github_webhook_secret: str | None = None
     opa_url: str = DEFAULT_OPA_URL
     opa_timeout_seconds: float = DEFAULT_OPA_TIMEOUT_SECONDS
+    github_pat: str | None = None
+    github_app_id: str | None = None
+    github_app_private_key_path: str | None = None
+    github_installation_id: str | None = None
 
     @staticmethod
     def from_environment() -> Settings:

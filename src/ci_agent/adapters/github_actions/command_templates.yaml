@@ -1,0 +1,21 @@
+# Allow-listed command construction for compiled pipeline steps (Batch 4, Task A).
+#
+# Section 7.3 "Tool misuse ... Enforce command schemas, argument validation and
+# allow-lists": these entries are the ONLY shell commands the compiler may ever
+# emit. There is no dynamic command construction from free-form tool names,
+# ever — the command_template_registry raises UnknownCommandTemplateError for
+# any id not present here.
+#
+# Keys are the command_template_id values referenced by the Batch 3 stage
+# templates (python.yaml / nodejs.yaml). A null value means the step is handled
+# natively by a pinned runner action instead of a shell command.
+"checkout.default": null          # handled natively by actions/checkout (pinned)
+"lint.ruff": "ruff check ."
+"sast.bandit": "bandit -r . -f json -o bandit-report.json"
+"tests.pytest": "pytest --junitxml=results.xml"
+"scan.gitleaks": "gitleaks detect --source . --report-format json --report-path gitleaks-report.json"
+"scan.pip-audit": "pip-audit -f json"
+"lint.eslint": "npx eslint ."
+"sast.semgrep": "semgrep scan --config auto --json --output semgrep-report.json"
+"tests.vitest": "npx vitest run --reporter=junit --outputFile=results.xml"
+"scan.npm-audit": "npm audit --json"

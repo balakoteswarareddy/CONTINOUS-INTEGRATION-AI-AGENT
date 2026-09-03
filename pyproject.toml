@@ -25,6 +25,9 @@ dependencies = [
     "sqlalchemy>=2.0",
     "alembic>=1.13",
     "httpx>=0.27",
+    # GitHub App JWT auth (Batch 4 adapter credentials).
+    "pyjwt>=2.8",
+    "cryptography>=42.0",
 ]
 
 [project.optional-dependencies]

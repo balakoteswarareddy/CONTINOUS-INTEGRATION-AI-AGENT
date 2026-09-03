@@ -108,6 +108,7 @@ class Planner:
                     ),
                     resource_limits=dict(entry.get("resource_limits", {})),
                     expected_outputs=list(entry.get("expected_outputs", [])),
+                    depends_on=list(stage.depends_on),
                 )
             )
 

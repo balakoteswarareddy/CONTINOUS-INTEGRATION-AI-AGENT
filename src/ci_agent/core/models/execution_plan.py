@@ -38,6 +38,10 @@ class ResolvedStep(BaseModel):
     retry_policy: RetryPolicy = Field(default_factory=RetryPolicy)
     resource_limits: dict[str, str] = Field(default_factory=dict)
     expected_outputs: list[str] = Field(default_factory=list)
+    # Stage ids this step depends on (mirrors PipelineSpec.stages.depends_on;
+    # Batch 4: used by runner adapters to build the runner's dependency graph,
+    # e.g. GitHub Actions `needs:`). Defaulted so Batch 3 payloads stay valid.
+    depends_on: list[str] = Field(default_factory=list)
 
 
 class ExecutionPlan(BaseModel):
