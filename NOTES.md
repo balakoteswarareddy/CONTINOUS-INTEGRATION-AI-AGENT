@@ -387,6 +387,18 @@ respx-mocked client tests and adapter unit tests.
 
 ## Consolidated deferred-items list (all batches)
 
+> **PRE-PRODUCTION GATE (blocks real rollout, does not block further
+> development):** Live GitHub E2E dispatch test has never been executed
+> against a real repository — sandbox credentials are a GitHub App
+> installation token scoped with all repo permissions denied (verified via
+> direct API probing: 403 on /user, check-runs, dispatches). Must be
+> executed with a PAT (repo+workflow scopes) or a properly-scoped GitHub App
+> against a disposable repository, with evidence (pass scenario + fail
+> scenario) attached to NOTES.md, BEFORE onboarding any real repository or
+> presenting this system as production-ready. Test harness is fully wired
+> and waiting (test_github_actions_dispatch.py) — this is a
+> credentials/access gap only, not a code gap.
+
 1. Reference architecture PDF is not in the repo; docs/README.md stands in
    (Batch 1). All section numbers cite the report from the batch specs.
 2. AI/LLM stages: permanently out of scope for this MVP (100% deterministic).
