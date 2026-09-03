@@ -13,6 +13,8 @@ from typing import Any
 
 import httpx
 
+from ci_agent.reliability.retry_policies import retry_transient_external_call
+
 DEFAULT_BASE_URL: str = "http://localhost:8181"
 DEFAULT_TIMEOUT_SECONDS: float = 5.0
 
@@ -42,11 +44,16 @@ class OPAClient:
     def base_url(self) -> str:
         return self._base_url
 
+    @retry_transient_external_call
     def evaluate(self, package: str, input_facts: dict[str, Any]) -> dict[str, Any]:
         """POST ``{"input": input_facts}`` to ``/v1/data/<package>``.
 
         Returns the ``result`` document of the response (empty dict when OPA
         answers without a result — treated as fail-closed by the PDP).
+
+        Wrapped with ``retry_transient_external_call`` (transport errors only).
+        A deny decision is a NORMAL 200 response and is never retried; the
+        decorator structurally cannot retry policy decisions.
         """
         path = f"/v1/data/{package.strip('/')}"
         try:

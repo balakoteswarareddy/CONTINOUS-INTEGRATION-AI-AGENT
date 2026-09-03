@@ -326,3 +326,93 @@ Not executed: no GitHub credentials are available in this sandbox. The test
 is wired to run for real when `GITHUB_PAT` (or App vars) and
 `CI_AGENT_TEST_REPO` are exported; all logic paths around it are covered by
 respx-mocked client tests and adapter unit tests.
+
+---
+
+# Batch 5 Notes — Orchestrator, Reporting, Reliability (MVP completion)
+
+## Design decisions & deviations
+
+1. **State adjacency.** `sast` and `unit_tests` are parallel jobs, so
+   `SAST_DONE <-> TESTS_DONE` transitions are allowed in either order;
+   `SECURITY_CHECKED` fires only when BOTH scans are terminal-passed, making
+   the policy gate order-safe under out-of-order webhooks. `format_lint`
+   chains `BASELINE_VALIDATED -> LINTED` (both transitions dual-written).
+2. **Gate timing.** The policy gate runs when all six tool stages are passed
+   (checked from StageExecutionRecords, not from event arrival order). Events
+   arriving after a terminal state are graceful audited no-ops (Section 10).
+3. **`CallerError` vs `OrchestrationError`.** Malformed/not-actionable API
+   requests (approve on a non-AWAITING_APPROVAL run -> HTTP 409) never mutate
+   run state; internal orchestration failures park the run in `ERROR`
+   (fail closed) via the same dual-write as normal transitions.
+4. **Approval rule (MVP).** `risk_tier == high` requires human approval;
+   everything else auto-approves after a passing policy gate. `PipelineSpec.
+   approvals_required` is not yet consulted (flagged below).
+5. **Merge decision Check Run** is named `ci-agent merge decision`; the
+   observer skips it (and `ci-agent-results`) so control-plane check runs are
+   never mistaken for stages. Its summary links
+   `/runs/{id}/report?view=compliance`.
+6. **PDP persistence.** Every PDP decision (including OPA-unavailable
+   fail-closed ones) is written to `policy_decision_records` (migration 0003)
+   in addition to the audit event; the compliance report reads these rows.
+7. **Registry keys.** `project_profiles.project_id` IS the repository full
+   name ("org/repo") — the same value the ingress writes to
+   `run_records.project_id`. The resolver-derived internal project id is kept
+   verbatim inside the profile JSON for traceability. Admin pipeline-spec
+   routes use `{project_id:path}` because project ids contain slashes.
+8. **Evidence honesty.** `tool_versions`, `artifacts`, `attestations` stay
+   EMPTY until later batches populate them (never fabricated, never omitted).
+   Failed stages produce one exit-code-only HIGH finding each (MVP; Batch 6
+   replaces with real scanner parsing).
+9. **Retries.** `retry_transient_external_call` (tenacity: 3 attempts,
+   exponential 0.5s cap 5s, transport + 5xx only) decorates exactly
+   `OPAClient.evaluate` and `GitHubClient.request`. The PDP's
+   `evaluate_gate` has no retry (verified by an inspection test): a policy
+   deny is a decision, not a failure.
+10. **Circuit breaker: hand-rolled** (~80 lines, threading.Lock, closed/
+    open/half-open) instead of pybreaker — fewer dependencies, explicit and
+    fully tested. The breaker-wrapped OPA path surfaces
+    `BreakerOpenError` -> `OPAUnavailableError`, so the PDP's fail-closed
+    behaviour is preserved even with an open breaker (tested).
+11. **Concurrency guard is in-process** (thread-safe counters). Multi-replica
+    deployments need a shared lease store — deferred below.
+12. **E2E audit trail growth.** With orchestration wired into the webhook
+    (entry point 1), the Batch 2 e2e assertion was relaxed from "trail equals
+    [webhook_received, run_created]" to "trail STARTS with those events" —
+    later entries belong to the orchestrator (documented evolution).
+13. **Backup/recovery.** `src/ci_agent/reliability/backup_notes.md` is an
+    HONEST ops document: no backup automation exists in the MVP; it lists the
+    pre-production plan (encrypted DB backups, audit-segment export, RPO/RTO,
+    secret rotation runbook).
+
+## Consolidated deferred-items list (all batches)
+
+1. Reference architecture PDF is not in the repo; docs/README.md stands in
+   (Batch 1). All section numbers cite the report from the batch specs.
+2. AI/LLM stages: permanently out of scope for this MVP (100% deterministic).
+3. Scanner findings parsing, SARIF ingestion, per-finding dispositions/waivers
+   -> Batch 6 (exit-code-only findings until then).
+4. SBOM generation, artifact signing/attestation, artifact publishing ->
+   Batch 7 (`EvidenceModel.artifacts/attestations` stay empty until then).
+5. Phase B (build/container/publish stages) -> later batch; Phase A only here.
+6. Runner credential hardening: OIDC/workload identity for the GitHub App
+   token exchange is pre-production; PAT is the documented MVP fallback.
+7. Admin API authn: static `X-Admin-Key` (MVP); SSO/RBAC/mTLS -> hardening.
+   Approver identity is a plain string (no SSO binding).
+8. Concurrency guard: single-process only; Redis/DB lease store for replicas.
+9. Reconciliation scheduler: CLI exists; cron/systemd/worker wiring is a
+   deployment concern.
+10. check_run -> run correlation is sha-based (head_sha == source_sha);
+    two simultaneous dispatches of the SAME sha are ambiguous (workflow_run
+    branch correlation disambiguates those events). Documented MVP limit.
+11. `PipelineSpec.approvals_required` not yet consulted by the approval rule
+    (risk-tier rule only) — revisit with Batch 6 policy enrichment.
+12. Live GitHub dispatch integration test requires real credentials; it was
+    NOT executed in this environment (no creds) — see README for the manual
+    procedure. All other paths are covered by mocked tests + real-OPA
+    integration tests.
+13. Backup/DR automation: none (see reliability/backup_notes.md).
+14. Breakers are wired/available on app.state but the HTTP-facing adapters do
+    not yet route every call through them (retries are active on both
+    external clients); completing breaker wrapping of every GitHubClient
+    method is a small hardening follow-up.

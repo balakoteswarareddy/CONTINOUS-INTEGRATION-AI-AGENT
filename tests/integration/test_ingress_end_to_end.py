@@ -66,7 +66,12 @@ def test_full_webhook_flow_creates_run_and_verifiable_chain(client: TestClient) 
     assert run.source_sha == "cafe1234"
 
     trail = store.get_audit_trail(run_id)
-    assert [entry.event_type for entry in trail] == ["webhook_received", "run_created"]
+    # Batch 5: the orchestrator continues past run creation (plan approval
+    # gate, dispatch attempt); the receipt events remain the trail's head.
+    assert [entry.event_type for entry in trail][:2] == [
+        "webhook_received",
+        "run_created",
+    ]
     assert store.verify_chain(run_id) is True
     assert store.is_delivery_processed("integration-delivery-1") is True
 

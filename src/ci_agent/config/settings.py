@@ -27,6 +27,11 @@ GITHUB_APP_ID_VARIABLE: str = "GITHUB_APP_ID"
 GITHUB_APP_PRIVATE_KEY_PATH_VARIABLE: str = "GITHUB_APP_PRIVATE_KEY_PATH"
 GITHUB_INSTALLATION_ID_VARIABLE: str = "GITHUB_INSTALLATION_ID"
 
+ADMIN_API_KEY_VARIABLE: str = "ADMIN_API_KEY"
+LOCAL_DEV_ADMIN_KEY: str = "ci-agent-local-admin-key"
+MAX_CONCURRENT_RUNS_VARIABLE: str = "MAX_CONCURRENT_RUNS_PER_PROJECT"
+DEFAULT_MAX_CONCURRENT_RUNS: int = 3
+
 OPA_URL_VARIABLE: str = "OPA_URL"
 DEFAULT_OPA_URL: str = "http://localhost:8181"
 OPA_TIMEOUT_VARIABLE: str = "OPA_TIMEOUT_SECONDS"
@@ -49,6 +54,8 @@ class Settings:
     github_app_id: str | None = None
     github_app_private_key_path: str | None = None
     github_installation_id: str | None = None
+    admin_api_key: str | None = None
+    max_concurrent_runs_per_project: int = DEFAULT_MAX_CONCURRENT_RUNS
 
     @staticmethod
     def from_environment() -> Settings:
@@ -62,6 +69,10 @@ class Settings:
             env=raw,
             database_url=_cleaned_env(DATABASE_URL_VARIABLE) or DEFAULT_DATABASE_URL,
             github_webhook_secret=_cleaned_env(GITHUB_WEBHOOK_SECRET_VARIABLE) or None,
+            admin_api_key=_cleaned_env(ADMIN_API_KEY_VARIABLE) or None,
+            max_concurrent_runs_per_project=_int_env(
+                MAX_CONCURRENT_RUNS_VARIABLE, DEFAULT_MAX_CONCURRENT_RUNS
+            ),
         )
 
     def resolved_webhook_secret(self) -> bytes:
@@ -80,6 +91,31 @@ class Settings:
             f"{GITHUB_WEBHOOK_SECRET_VARIABLE} must be set when {ENV_VARIABLE} is "
             f"{self.env!r} (refusing to start the ingress with an unverifiable webhook secret)"
         )
+
+    def resolved_admin_api_key(self) -> str:
+        """Admin API key for the internal admin endpoints (MVP-grade control).
+
+        ``local`` falls back to a documented dev default; other environments
+        must set ``ADMIN_API_KEY`` (startup fails loudly otherwise).
+        """
+        if self.admin_api_key:
+            return self.admin_api_key
+        if self.env == "local":
+            return LOCAL_DEV_ADMIN_KEY
+        raise RuntimeError(
+            f"{ADMIN_API_KEY_VARIABLE} must be set when {ENV_VARIABLE} is {self.env!r} "
+            "(refusing to expose admin endpoints without a key)"
+        )
+
+
+def _int_env(name: str, default: int) -> int:
+    raw = _cleaned_env(name)
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
 
 
 def _cleaned_env(name: str) -> str:

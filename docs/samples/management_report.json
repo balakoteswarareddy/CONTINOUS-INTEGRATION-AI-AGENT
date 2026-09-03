@@ -1,0 +1,16 @@
+{
+  "generated_at": "2026-09-03T08:56:20.296147",
+  "lead_time_ms": null,
+  "outcome": "pass",
+  "policy_exceptions_count": 0,
+  "risk_tier": "low",
+  "run_id": "run-demo",
+  "stage_durations_ms": {
+    "checkout": null,
+    "dependency_scan": null,
+    "format_lint": null,
+    "sast": null,
+    "secret_scan": null,
+    "unit_tests": null
+  }
+}

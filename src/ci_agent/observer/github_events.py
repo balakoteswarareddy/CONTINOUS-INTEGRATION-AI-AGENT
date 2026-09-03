@@ -15,6 +15,7 @@ Run correlation (documented in NOTES.md):
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from sqlalchemy import select
@@ -28,11 +29,15 @@ from ci_agent.audit.audit_store import AuditStore
 from ci_agent.core.models.common import StageStatus
 from ci_agent.db.models import RunRecord
 from ci_agent.observer.execution_observer import ExecutionObserver
+from ci_agent.orchestrator.phase_a_orchestrator import MERGE_DECISION_CHECK_NAME
 
 DISPATCH_BRANCH_PREFIX = "ci-agent/"
 WORKFLOW_STAGE_ID = "workflow"  # pseudo-stage for overall workflow status
 RESULTS_JOB_NAME = "ci-agent-results"
 UNMATCHED_AUDIT_RUN_ID = "observer:unmatched"
+
+# Check run names owned by the control plane itself — never mapped to stages.
+CONTROL_PLANE_CHECK_NAMES = frozenset({RESULTS_JOB_NAME, MERGE_DECISION_CHECK_NAME})
 
 
 class ObserverEventHandlers:
@@ -47,6 +52,8 @@ class ObserverEventHandlers:
         self._observer = observer
         self._audit_store = audit_store
         self._session_factory = session_factory
+        # Optional orchestrator callback (entry point 2), wired in create_app.
+        self.on_stage_transition: Callable[..., object] | None = None
 
     # ------------------------------------------------------------- dispatch
 
@@ -78,6 +85,7 @@ class ObserverEventHandlers:
             status,
             logs_ref=self._logs_url(payload),
         )
+        self._notify_orchestrator(run.run_id, WORKFLOW_STAGE_ID, status)
         return run.run_id
 
     def handle_check_run(self, payload: dict[str, Any]) -> tuple[str, str] | None:
@@ -87,8 +95,8 @@ class ObserverEventHandlers:
         """
         check_run = payload.get("check_run") or {}
         name = str(check_run.get("name") or "")
-        if name == RESULTS_JOB_NAME:
-            return None  # the results job, not a stage
+        if name in CONTROL_PLANE_CHECK_NAMES:
+            return None  # results job / published merge decision, not a stage
 
         head_sha = str(check_run.get("head_sha") or "")
         run = self._find_run_by_sha(head_sha)
@@ -98,6 +106,7 @@ class ObserverEventHandlers:
 
         status = map_check_run(str(check_run.get("status", "")), check_run.get("conclusion"))
         self._observer.record_stage_transition(run.run_id, name, status)
+        self._notify_orchestrator(run.run_id, name, status)
         return run.run_id, name
 
     # ------------------------------------------------------------ internals
@@ -121,6 +130,19 @@ class ObserverEventHandlers:
                 .order_by(RunRecord.created_at.desc())
                 .limit(1)
             ).scalar_one_or_none()
+
+    def _notify_orchestrator(self, run_id: str, stage_id: str, status: StageStatus) -> None:
+        """Orchestrator entry point 2 (Batch 5); never breaks event recording."""
+        callback = self.on_stage_transition
+        if callback is None:
+            return
+        try:
+            callback(run_id, stage_id, status.value)
+        except Exception:
+            self._audit_unmatched(
+                "orchestrator_notify",
+                f"stage {stage_id!r} notification failed for run {run_id!r}",
+            )
 
     def _audit_unmatched(self, event: str, reason: str) -> None:
         """Unmatched events are still evidence — audited under a synthetic id."""

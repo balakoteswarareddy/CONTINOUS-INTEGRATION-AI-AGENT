@@ -28,6 +28,9 @@ dependencies = [
     # GitHub App JWT auth (Batch 4 adapter credentials).
     "pyjwt>=2.8",
     "cryptography>=42.0",
+    # Reliability controls (Batch 5) — retries with backoff for transient
+    # external-call failures only (never policy/security decisions).
+    "tenacity>=8.2",
 ]
 
 [project.optional-dependencies]
@@ -75,6 +78,7 @@ select = ["E", "W", "F", "I", "B", "UP", "SIM", "C4", "RUF"]
 # Batch 1 spec mandates enums "subclass str, Enum" — keep that exact form
 # instead of enum.StrEnum (documented in NOTES.md Section 5).
 "src/ci_agent/core/models/common.py" = ["UP042"]
+"src/ci_agent/orchestrator/run_state.py" = ["UP042"]
 
 [tool.black]
 line-length = 100

@@ -27,27 +27,15 @@ from typing import Any
 import httpx
 import jwt
 
+from ci_agent.adapters.errors import GitHubAPIError
+from ci_agent.reliability.retry_policies import retry_transient_external_call
+
 GITHUB_API_BASE_URL = "https://api.github.com"
 DEFAULT_TIMEOUT_SECONDS = 10.0
 APP_TOKEN_TTL_SECONDS = 600
 TOKEN_EXPIRY_MARGIN_SECONDS = 60
 
 logger = logging.getLogger(__name__)
-
-
-class GitHubAPIError(RuntimeError):
-    """A GitHub API call failed (non-2xx, timeout, or unusable response).
-
-    Carries the HTTP status code and response body (when available). Never
-    raised as a bare exception — callers can catch this type specifically.
-    """
-
-    def __init__(
-        self, message: str, status_code: int | None = None, body: str | None = None
-    ) -> None:
-        self.status_code = status_code
-        self.body = body
-        super().__init__(message)
 
 
 @dataclass(frozen=True)
@@ -143,6 +131,7 @@ class GitHubClient:
 
     # ---------------------------------------------------------- requests
 
+    @retry_transient_external_call
     def request(
         self,
         method: str,
@@ -151,7 +140,12 @@ class GitHubClient:
         json_body: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
     ) -> httpx.Response:
-        """Perform an authenticated GitHub API request with explicit error mapping."""
+        """Perform an authenticated GitHub API request with explicit error mapping.
+
+        Wrapped with ``retry_transient_external_call``: transport errors and
+        5xx responses are retried with bounded backoff; 4xx responses are NOT
+        (client errors are deterministic). Policy decisions are never retried.
+        """
         merged = {"Accept": "application/vnd.github+json", **self._auth_header(), **(headers or {})}
         try:
             response = self._client.request(method, path, json=json_body, headers=merged)

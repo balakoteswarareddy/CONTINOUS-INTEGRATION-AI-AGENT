@@ -13,12 +13,16 @@ Every evaluation call, regardless of outcome, is persisted as a
 
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Any
+
+from sqlalchemy.orm import Session, sessionmaker
 
 from ci_agent.audit.audit_store import AuditStore
 from ci_agent.core.models.common import PolicyDecision
 from ci_agent.core.models.policy_spec import PolicySpec
+from ci_agent.db.models import PolicyDecisionRecord, utcnow
 from ci_agent.governance import load_policy_spec
 from ci_agent.policy.models import PolicyDecisionResult, PolicyInputFacts
 from ci_agent.policy.opa_client import OPAClient, OPAUnavailableError
@@ -75,10 +79,14 @@ class PolicyDecisionPoint:
         opa_client: OPAClient,
         audit_store: AuditStore,
         policy_spec: PolicySpec | None = None,
+        session_factory: sessionmaker[Session] | None = None,
     ) -> None:
         self._opa_client = opa_client
         self._audit_store = audit_store
         self._policy_spec = policy_spec or load_policy_spec()
+        # Optional persistence of every decision as a PolicyDecisionRecord row
+        # (Batch 5): evidence assembly reads these instead of scraping logs.
+        self._session_factory = session_factory
 
     @property
     def policy_version(self) -> str:
@@ -250,3 +258,17 @@ class PolicyDecisionPoint:
                 "evaluation_id": str(uuid.uuid4()),
             },
         )
+        if self._session_factory is not None:
+            with self._session_factory() as session:
+                session.add(
+                    PolicyDecisionRecord(
+                        run_id=facts.run_id or UNATTRIBUTED_RUN_ID,
+                        stage_id=stage_id,
+                        decision=result.decision.value,
+                        policy_family=result.policy_family,
+                        policy_version=result.policy_version,
+                        reasons_json=json.dumps(result.reasons),
+                        evaluated_at=utcnow(),
+                    )
+                )
+                session.commit()

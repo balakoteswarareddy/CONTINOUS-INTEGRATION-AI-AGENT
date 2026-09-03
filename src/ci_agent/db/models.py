@@ -61,6 +61,12 @@ class RunRecord(Base):
     dispatch_branch: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # GitHub's workflow run id once resolved after workflow_dispatch.
     external_run_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # --- Batch 5 addition: explicit pipeline state (Report Section 10) -------
+    # Value drawn from ci_agent.orchestrator.run_state.RunState; the control
+    # plane's authoritative pipeline position, dual-written with the audit log.
+    current_state: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # sha256 of the registered pipeline spec used for this run (evidence ref).
+    pipeline_spec_ref: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return f"<RunRecord run_id={self.run_id!r} status={self.status!r}>"
@@ -142,3 +148,72 @@ class StageExecutionRecord(Base):
             f"<StageExecutionRecord run_id={self.run_id!r} stage_id={self.stage_id!r} "
             f"status={self.status!r}>"
         )
+
+
+class ApprovalRecord(Base):
+    """A human approve/reject decision for an AWAITING_APPROVAL run (Batch 5).
+
+    Part of the compliance evidence package; approver identity is a plain
+    string for the MVP (no SSO integration) — see NOTES.md.
+    """
+
+    __tablename__ = "approval_records"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(String(64), index=True)
+    # "approved" | "rejected" (ApprovalDecision.value)
+    decision: Mapped[str] = mapped_column(String(16))
+    approver: Mapped[str] = mapped_column(String(255))
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow)
+
+
+class PolicyDecisionRecord(Base):
+    """Persisted PDP decision per gated stage (Batch 3 evaluated in-memory).
+
+    Makes every policy/security decision queryable for evidence assembly;
+    policy decisions are never retried (Report Section 10) and never inferred
+    from runner logs.
+    """
+
+    __tablename__ = "policy_decision_records"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(String(64), index=True)
+    stage_id: Mapped[str] = mapped_column(String(128))
+    # "allow" | "deny" (Decision.outcome) or "unavailable"
+    decision: Mapped[str] = mapped_column(String(16))
+    policy_family: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    policy_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    reasons_json: Mapped[str] = mapped_column(Text, default="[]")
+    evaluated_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow)
+
+
+class ProjectProfileRecord(Base):
+    """Registered project (repository) profile — Batch 5 project registry."""
+
+    __tablename__ = "project_profiles"
+
+    project_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    # "low" | "medium" | "high" (RiskTier.value)
+    risk_tier: Mapped[str] = mapped_column(String(16))
+    language_stack: Mapped[str] = mapped_column(String(64))
+    profile_json: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow, onupdate=utcnow)
+
+
+class PipelineSpecRecord(Base):
+    """Content-addressed pipeline spec versions per project (Batch 5).
+
+    ``content_hash`` is the sha256 of the canonical spec JSON ("spec hash ref"
+    in the report); the hash is what run records and evidence reference.
+    """
+
+    __tablename__ = "pipeline_specs"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    project_id: Mapped[str] = mapped_column(String(255), index=True)
+    content_hash: Mapped[str] = mapped_column(String(64), index=True)
+    spec_json: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow)

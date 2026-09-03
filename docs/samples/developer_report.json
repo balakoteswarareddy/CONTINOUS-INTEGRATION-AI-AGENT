@@ -1,0 +1,56 @@
+{
+  "findings_count": 0,
+  "generated_at": "2026-09-03T08:56:20.296127",
+  "run_id": "run-demo",
+  "stages": [
+    {
+      "duration_ms": null,
+      "exit_code": 0,
+      "logs_ref": null,
+      "remediation_hint": "",
+      "stage_id": "checkout",
+      "status": "passed"
+    },
+    {
+      "duration_ms": null,
+      "exit_code": 0,
+      "logs_ref": null,
+      "remediation_hint": "",
+      "stage_id": "format_lint",
+      "status": "passed"
+    },
+    {
+      "duration_ms": null,
+      "exit_code": 0,
+      "logs_ref": null,
+      "remediation_hint": "",
+      "stage_id": "sast",
+      "status": "passed"
+    },
+    {
+      "duration_ms": null,
+      "exit_code": 0,
+      "logs_ref": null,
+      "remediation_hint": "",
+      "stage_id": "unit_tests",
+      "status": "passed"
+    },
+    {
+      "duration_ms": null,
+      "exit_code": 0,
+      "logs_ref": null,
+      "remediation_hint": "",
+      "stage_id": "secret_scan",
+      "status": "passed"
+    },
+    {
+      "duration_ms": null,
+      "exit_code": 0,
+      "logs_ref": null,
+      "remediation_hint": "",
+      "stage_id": "dependency_scan",
+      "status": "passed"
+    }
+  ],
+  "state": "merge_decision_published"
+}

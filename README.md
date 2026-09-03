@@ -48,7 +48,15 @@ src/ci_agent/
 ├── ingress/            # FastAPI Trigger Gateway (webhooks/github, /healthz)
 ├── resolver/           # Intake answers -> validated ProjectProfile
 ├── policy/             # Policy Decision Point + thin OPA REST client
-└── planner/            # Approved stage templates -> ExecutionPlan
+├── planner/            # Approved stage templates -> ExecutionPlan
+├── adapters/           # RunnerAdapter seam + GitHub Actions compiler/client
+├── observer/           # Execution Observer: stage records, webhook mapping,
+│   │                   #   reconciliation CLI (Section 10)
+│   └── ...
+├── orchestrator/       # Phase A RunState machine + orchestrator + approvals
+├── projects/           # Project registry + admin onboarding API
+├── reporting/          # Evidence assembler + developer/mgmt/compliance views
+└── reliability/        # Retries, circuit breakers, concurrency guard
 governance/rego/        # Rego policy files (loaded by OPA; reviewed like code)
 alembic.ini             # Alembic configuration (audit database migrations)
 docker-compose.yml      # Local OPA service (Batch 3)
@@ -100,7 +108,9 @@ Prints a PASS/FAIL line for each of the 10 governance files (3 catalog files +
 ## Database migrations
 
 ```bash
-alembic upgrade head        # creates run_records, audit_log_entries, processed_deliveries
+alembic upgrade head        # 0001 runs/audit/deliveries, 0002 stage executions +
+                            # dispatch tracking, 0003 run state + approvals +
+                            # policy decisions + project registry
 ```
 
 `DATABASE_URL` overrides the target database. In `local` envs the app also
@@ -162,3 +172,72 @@ mypy
 `.env.example` documents every environment variable. Never commit real
 secrets — the webhook secret is read only from the environment via
 `ci_agent.config.settings`.
+
+
+## Batch 4/5: live dispatch + full Phase A orchestration (MVP complete)
+
+The control plane now covers the whole Section 5.1 Phase A loop:
+
+```
+webhook -> run -> plan_approval (OPA) -> dispatch (GitHub Actions) ->
+observer stage transitions -> policy_gate (OPA) -> [approval] ->
+merge decision Check Run -> evidence + reports
+```
+
+### 1. Configure credentials (live dispatch)
+
+```bash
+export GITHUB_PAT=github_pat_...        # or the GitHub App triple:
+# export GITHUB_APP_ID=12345
+# export GITHUB_APP_PRIVATE_KEY_PATH=/secure/path/app.pem
+# export GITHUB_INSTALLATION_ID=67890
+export ADMIN_API_KEY=$(openssl rand -hex 24)   # required outside `local`
+```
+
+### 2. Onboard a project (admin API)
+
+```bash
+curl -X POST http://localhost:8000/admin/projects \
+  -H "X-Admin-Key: $ADMIN_API_KEY" -H "Content-Type: application/json" \
+  -d '{"repository": "example-org/payments-api", "intake_answers": { ...intake schema answers... }}'
+
+curl -X POST http://localhost:8000/admin/projects/example-org%2Fpayments-api/pipeline-spec \
+  -H "X-Admin-Key: $ADMIN_API_KEY" -H "Content-Type: application/json" \
+  -d '{"spec": { ...PipelineSpec JSON... }}'
+```
+
+### 3. Trigger + watch a run
+
+Send a signed webhook (see above). The response acknowledges acceptance and
+kicks off orchestration: the run lands on branch `ci-agent/<run_id>` in your
+repo with one job per stage and a `ci-agent-results` artifact. Observer
+webhooks (`workflow_run`, `check_run`) advance the run state; when the tool
+stages finish, the policy gate evaluates and the merge decision is published
+as a Check Run linking the compliance report.
+
+```bash
+curl "http://localhost:8000/runs/<run_id>"                        # run summary
+curl "http://localhost:8000/runs/<run_id>/report?view=developer"  # per-stage + hints
+curl "http://localhost:8000/runs/<run_id>/report?view=management" # outcome + lead time
+curl "http://localhost:8000/runs/<run_id>/report?view=compliance" # full evidence
+```
+
+High-risk projects pause at `awaiting_approval`:
+
+```bash
+curl -X POST "http://localhost:8000/runs/<run_id>/approve" \
+  -H "Content-Type: application/json" -d '{"approver": "alice"}'
+```
+
+Reconciliation fallback (Section 10, missed webhooks):
+
+```bash
+python -m ci_agent.observer.reconciliation --run-id <run_id>
+```
+
+Live-dispatch integration test (needs real credentials):
+
+```bash
+export CI_AGENT_TEST_REPO=example-org/payments-api
+pytest tests/integration/test_github_actions_dispatch.py -v
+```

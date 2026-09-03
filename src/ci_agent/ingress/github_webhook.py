@@ -337,5 +337,20 @@ async def github_webhook(request: Request) -> Response:
         },
     )
 
-    # 11. Accepted.
-    return JSONResponse(status_code=202, content={"run_id": run_id, "status": "accepted"})
+    # 11. Orchestrator entry point 1 (Batch 5): plan -> plan_approval ->
+    # dispatch. Failures are audited and park the run in ERROR; the webhook
+    # still acknowledges acceptance of the trigger.
+    orchestration = {"status": "skipped"}
+    orchestrator = getattr(state, "orchestrator", None)
+    if orchestrator is not None:
+        try:
+            result = orchestrator.advance(run_id, {"type": "run_created"})
+            orchestration = {"status": "advanced", "result": result}
+        except Exception as exc:
+            orchestration = {"status": "error", "detail": str(exc)[:200]}
+
+    # 12. Accepted.
+    return JSONResponse(
+        status_code=202,
+        content={"run_id": run_id, "status": "accepted", "orchestration": orchestration},
+    )
