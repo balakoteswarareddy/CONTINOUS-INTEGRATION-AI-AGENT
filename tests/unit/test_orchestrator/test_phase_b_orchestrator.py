@@ -17,6 +17,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 from tests.unit.test_projects.test_project_registry import INTAKE_SCHEMA, _answers
 
@@ -48,6 +49,16 @@ DIGEST = "sha256:" + "7c" * 32
 SIGN_BUNDLE = json.dumps(
     {"signature_ref": "image.sig", "bundle_ref": "image.bundle", "keyless": False}
 )
+
+
+def _opa_up() -> bool:
+    try:
+        return httpx.get("http://127.0.0.1:8181/health", timeout=2.0).status_code == 200
+    except httpx.TransportError:
+        return False
+
+
+requires_opa = pytest.mark.skipif(not _opa_up(), reason="requires live OPA")
 
 
 def _phase_b_spec_document() -> dict[str, Any]:
@@ -461,6 +472,7 @@ class TestPublishGateEnforcement:
             assert session.get(RunRecord, "run-nosig").current_state == "error"
         assert len(env["adapter"].dispatches) == 1  # wave 2 never dispatched
 
+    @requires_opa
     def test_unverifiable_signature_blocks_publish_with_live_opa(self, env) -> None:
         """Signing required by policy; the recorded signature FAILS real
         verification -> artifact_policy rejects -> run FAILED, no wave 2."""
