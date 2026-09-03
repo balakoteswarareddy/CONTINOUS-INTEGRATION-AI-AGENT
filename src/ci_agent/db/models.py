@@ -73,6 +73,13 @@ class RunRecord(Base):
     # approved Phase A merge decision; evidence downloads use these coords.
     phase_b_branch: Mapped[str | None] = mapped_column(String(255), nullable=True)
     phase_b_external_run_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # --- Batch 8 additions (Batch 7.1 folded-in Fix B: wave-2 coordinates) ---
+    # The publish wave (wave 2) is dispatched ONLY after the publish gate
+    # passes; its dispatch coordinates are persisted HERE — on the RunRecord,
+    # retrievable from the DB directly, not only from audit event payloads.
+    # Same table/naming convention as the wave-1 equivalents above.
+    phase_b_wave2_branch: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    phase_b_wave2_external_run_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # --- Batch 5 addition: explicit pipeline state (Report Section 10) -------
     # Value drawn from ci_agent.orchestrator.run_state.RunState; the control
     # plane's authoritative pipeline position, dual-written with the audit log.

@@ -52,6 +52,9 @@ def test_alembic_upgrade_head_creates_all_tables(tmp_path: Path) -> None:
             "status",
             "created_at",
             "updated_at",
+            # Batch 8 (folded-in Batch 7.1 Fix B): wave-2 dispatch coordinates.
+            "phase_b_wave2_branch",
+            "phase_b_wave2_external_run_id",
         }
         assert expected_run <= run_columns
         audit_columns = {col["name"] for col in inspector.get_columns("audit_log_entries")}
@@ -96,3 +99,53 @@ def test_alembic_upgrade_head_is_idempotent(tmp_path: Path) -> None:
     assert first.returncode == 0, first.stderr
     assert second.returncode == 0, second.stderr
     assert "Running upgrade" not in second.stdout  # nothing left to do
+
+
+def _run_alembic(db_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    env["DATABASE_URL"] = f"sqlite:///{db_path}"
+    return subprocess.run(
+        [sys.executable, "-m", "alembic", *args],
+        cwd=REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_migration_0006_up_down_up(tmp_path: Path) -> None:
+    """Batch 8 migration 0006: wave-2 columns survive up/down/up verified."""
+    db_path = tmp_path / "migration-0006.db"
+
+    up = _run_alembic(db_path, "upgrade", "head")
+    assert up.returncode == 0, f"upgrade head failed:\n{up.stdout}\n{up.stderr}"
+
+    engine = sqlalchemy.create_engine(f"sqlite:///{db_path}")
+    try:
+        inspector = sqlalchemy.inspect(engine)
+        columns = {col["name"] for col in inspector.get_columns("run_records")}
+        assert {"phase_b_wave2_branch", "phase_b_wave2_external_run_id"} <= columns
+    finally:
+        engine.dispose()
+
+    down = _run_alembic(db_path, "downgrade", "0005")
+    assert down.returncode == 0, f"downgrade 0006 failed:\n{down.stdout}\n{down.stderr}"
+    engine = sqlalchemy.create_engine(f"sqlite:///{db_path}")
+    try:
+        inspector = sqlalchemy.inspect(engine)
+        columns = {col["name"] for col in inspector.get_columns("run_records")}
+        assert "phase_b_wave2_branch" not in columns
+        assert "phase_b_wave2_external_run_id" not in columns
+    finally:
+        engine.dispose()
+
+    up_again = _run_alembic(db_path, "upgrade", "head")
+    assert up_again.returncode == 0, f"re-upgrade failed:\n{up_again.stdout}\n{up_again.stderr}"
+    engine = sqlalchemy.create_engine(f"sqlite:///{db_path}")
+    try:
+        inspector = sqlalchemy.inspect(engine)
+        columns = {col["name"] for col in inspector.get_columns("run_records")}
+        assert {"phase_b_wave2_branch", "phase_b_wave2_external_run_id"} <= columns
+    finally:
+        engine.dispose()

@@ -246,15 +246,19 @@ class PhaseBOrchestrator:
 
         profile = self._registry.get_profile(run.project_id)
         spec_document = self._registry.get_pipeline_spec(run.project_id)
+        # Batch 8 (folded-in Batch 7.1 Fix A): this is a spec RE-FETCH point —
+        # the run was authorized against a spec hash persisted by Phase A, so
+        # the re-fetched spec must hash to EXACTLY that value. A mismatch (a
+        # mid-run registry edit) parks the run in ERROR (fail closed), audits
+        # "spec_drift_detected" with both hashes, and never dispatches. The
+        # persisted pipeline_spec_ref is an immutable record of what the run
+        # was authorized against — it is never overwritten here.
+        if not self._spec_drift_check(run_id, spec_document, point="phase_b_wave_1"):
+            return {"state": RunState.ERROR.value, "reason": "spec drift detected"}
         spec = PipelineSpec.model_validate(spec_document)
         plan = self._planner.build_execution_plan(
             profile, spec, self._policy_version, run_id=run_id
         )
-        with self._session_factory() as session:
-            persisted = session.get(RunRecord, run_id)
-            assert persisted is not None, f"run {run_id!r} vanished mid-planning"
-            persisted.pipeline_spec_ref = _canonical_spec_hash(spec_document)
-            session.commit()
 
         wave_1 = self._wave_plan(plan, PHASE_B_WAVE_1_STAGES)
         artifact = self._adapter.compile(
@@ -412,6 +416,13 @@ class PhaseBOrchestrator:
         run = self._require_run(run_id)
         profile = self._registry.get_profile(run.project_id)
         spec_document = self._registry.get_pipeline_spec(run.project_id)
+        # Batch 8 (folded-in Batch 7.1 Fix A): the wave-2 re-fetch point (the
+        # batch spec calls this the publish-wave execution point). Same guard
+        # as wave 1: a spec whose hash no longer matches the run's authorized
+        # pipeline_spec_ref parks the run in ERROR and the publish wave is
+        # NEVER dispatched (fail closed; the push job must not exist).
+        if not self._spec_drift_check(run_id, spec_document, point="phase_b_wave_2"):
+            return {"state": RunState.ERROR.value, "reason": "spec drift detected"}
         spec = PipelineSpec.model_validate(spec_document)
         plan = self._planner.build_execution_plan(
             profile, spec, self._policy_version, run_id=run_id
@@ -434,13 +445,24 @@ class PhaseBOrchestrator:
             wave_2,
             metadata={"repository": run.repository, "source_sha": run.source_sha or ""},
         )
-        self._adapter.dispatch(artifact, run_id)
+        wave2_ref = self._adapter.dispatch(artifact, run_id)
+        # Batch 8 (folded-in Batch 7.1 Fix B): persist the wave-2 dispatch
+        # coordinates on the RunRecord itself (same convention as the wave-1
+        # columns) — queryable from the DB directly, not only from the audit
+        # event payload below.
+        with self._session_factory() as session:
+            persisted = session.get(RunRecord, run_id)
+            assert persisted is not None, f"run {run_id!r} vanished mid-dispatch"
+            persisted.phase_b_wave2_branch = wave2_ref.branch
+            persisted.phase_b_wave2_external_run_id = wave2_ref.external_run_id
+            session.commit()
         waived = decision.decision is PolicyDecision.WAIVED
         self._audit(
             run_id,
             "phase_b_dispatched",
             {
                 "wave": "2",
+                "dispatch_branch": wave2_ref.branch,
                 "stages": list(PHASE_B_WAVE_2_STAGES),
                 "note": (
                     "publish_gate waived by exception " + ",".join(decision.exception_ids)
@@ -635,6 +657,59 @@ class PhaseBOrchestrator:
 
     # ------------------------------------------------------------- plumbing
     # (mirrors PhaseAOrchestrator — dual-write, monotonic, fail-closed)
+
+    def _spec_drift_check(self, run_id: str, spec_document: dict[str, Any], *, point: str) -> bool:
+        """Folded-in Batch 7.1 Fix A: fail-closed spec-drift guard.
+
+        Compares the canonical hash of the RE-FETCHED spec document against
+        the ``pipeline_spec_ref`` persisted on the RunRecord (the immutable
+        record of what the run was authorized against — written once by Phase
+        A at initial dispatch and never overwritten afterwards).
+
+        Returns True when the run may proceed. On mismatch: transitions the
+        run to ERROR (fail closed), appends a ``spec_drift_detected`` audit
+        event carrying BOTH hashes, and returns False — the caller must NOT
+        dispatch. A NULL persisted hash (legacy pre-Batch-8 rows that never
+        got an initial write) is treated as the initial write, not drift.
+        """
+        actual_hash = _canonical_spec_hash(spec_document)
+        with self._session_factory() as session:
+            persisted = session.get(RunRecord, run_id)
+            assert persisted is not None, f"run {run_id!r} vanished mid-planning"
+            expected_hash = persisted.pipeline_spec_ref
+            if expected_hash is None:
+                # Initial write for a legacy row (no Phase A authorization
+                # hash was recorded): record it; there is nothing to compare.
+                persisted.pipeline_spec_ref = actual_hash
+                session.commit()
+                self._audit(
+                    run_id,
+                    "pipeline_spec_ref_backfilled",
+                    {"point": point, "hash": actual_hash},
+                )
+                return True
+        if expected_hash != actual_hash:
+            self._transition(
+                run_id,
+                self._current_state(run_id),
+                RunState.ERROR,
+                reason=(
+                    f"spec drift detected at {point}: the registered pipeline "
+                    "spec changed after the run was authorized — refusing to "
+                    "dispatch against an unauthorized spec"
+                ),
+            )
+            self._audit(
+                run_id,
+                "spec_drift_detected",
+                {
+                    "point": point,
+                    "expected_hash": expected_hash,
+                    "actual_hash": actual_hash,
+                },
+            )
+            return False
+        return True
 
     def _require_run(self, run_id: str) -> RunRecord:
         with self._session_factory() as session:

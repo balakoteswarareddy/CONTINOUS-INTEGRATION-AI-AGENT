@@ -190,6 +190,14 @@ class PhaseAOrchestrator:
         with self._session_factory() as session:
             persisted = session.get(RunRecord, run_id)
             assert persisted is not None, f"run {run_id!r} vanished mid-planning"
+            # Batch 8 (folded-in Batch 7.1 Fix A): this is the FIRST write of
+            # pipeline_spec_ref — the run is being AUTHORIZED against this
+            # spec right now, so there is no prior value to compare against
+            # and the spec-drift guard intentionally does not apply here.
+            # Every LATER re-fetch point (Phase B wave 1 / wave 2) compares
+            # against this value and fails closed on mismatch; the column is
+            # an immutable record of what the run was authorized against and
+            # is never overwritten after this write.
             persisted.pipeline_spec_ref = spec_ref
             session.commit()
 

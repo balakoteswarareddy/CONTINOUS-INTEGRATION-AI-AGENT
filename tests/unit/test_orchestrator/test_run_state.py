@@ -62,8 +62,15 @@ def test_merge_decision_published_only_leads_to_phase_b() -> None:
     No Phase A or error state may reach BUILT — Phase B never runs against
     unapproved code (Section 5.2; enforced by PhaseBOrchestrator.start and
     tested there end-to-end).
+
+    Batch 8: MERGE_DECISION_PUBLISHED additionally carries fail-closed
+    FAILED/ERROR outgoing edges (spec-drift guard + latent wave-1-failure
+    gap; NOTES.md) — the BUILT gateway itself is unchanged: it remains the
+    ONLY success edge and no other state may reach BUILT.
     """
-    assert ALLOWED_RUN_TRANSITIONS[RunState.MERGE_DECISION_PUBLISHED] == frozenset({RunState.BUILT})
+    assert ALLOWED_RUN_TRANSITIONS[RunState.MERGE_DECISION_PUBLISHED] == frozenset(
+        {RunState.BUILT, RunState.FAILED, RunState.ERROR}
+    )
     for state, targets in ALLOWED_RUN_TRANSITIONS.items():
         if state in (None, RunState.MERGE_DECISION_PUBLISHED):
             continue
@@ -105,9 +112,21 @@ def test_skip_ahead_raises() -> None:
         assert_run_transition(RunState.TRIGGER_VALIDATED, RunState.TESTS_DONE)
 
 
-def test_published_to_failed_raises() -> None:
+def test_published_to_failed_now_allowed_fail_closed() -> None:
+    """Batch 8: merge_decision_published -> FAILED/ERROR are legal (fail closed).
+
+    Required by the spec-drift guard (a mid-run registry edit parks the run in
+    ERROR at Phase B start) and by wave-1 stage failures observed before BUILT
+    lands. Success from this state still leads ONLY to BUILT; backwards
+    transitions remain illegal (monotonic machine).
+    """
+    assert_run_transition(RunState.MERGE_DECISION_PUBLISHED, RunState.FAILED)
+    assert_run_transition(RunState.MERGE_DECISION_PUBLISHED, RunState.ERROR)
+    assert_run_transition(RunState.MERGE_DECISION_PUBLISHED, RunState.BUILT)
     with pytest.raises(InvalidRunTransitionError):
-        assert_run_transition(RunState.MERGE_DECISION_PUBLISHED, RunState.FAILED)
+        assert_run_transition(RunState.MERGE_DECISION_PUBLISHED, RunState.CHECKED_OUT)
+    with pytest.raises(InvalidRunTransitionError):
+        assert_run_transition(RunState.MERGE_DECISION_PUBLISHED, RunState.EVIDENCE_RECORDED)
 
 
 def test_awaiting_approval_paths() -> None:

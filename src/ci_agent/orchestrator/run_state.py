@@ -113,7 +113,13 @@ ALLOWED_RUN_TRANSITIONS: dict[RunState | None, frozenset[RunState]] = {
     # Batch 7: an APPROVED Phase A merge decision is the ONLY gateway into
     # Phase B (Section 5.2). No other state may enter BUILT — a failed or
     # rejected Phase A can never reach the supply-chain flow (tested).
-    RunState.MERGE_DECISION_PUBLISHED: frozenset({RunState.BUILT}),
+    # Batch 8: FAILED/ERROR outgoing edges added — required by the spec-drift
+    # guard (a mid-run registry edit at Phase B start must park the run in
+    # ERROR, fail-closed) and consistent with every other active state having
+    # fail edges; it also repairs a latent Batch 7 gap where a failing wave-1
+    # stage observed while still at merge_decision_published could neither
+    # transition to FAILED nor park in ERROR (documented in NOTES.md).
+    RunState.MERGE_DECISION_PUBLISHED: frozenset({RunState.BUILT, RunState.FAILED, RunState.ERROR}),
     RunState.BUILT: frozenset({RunState.INTEGRATION_TESTED, RunState.FAILED, RunState.ERROR}),
     RunState.INTEGRATION_TESTED: frozenset(
         {RunState.COVERAGE_CHECKED, RunState.FAILED, RunState.ERROR}

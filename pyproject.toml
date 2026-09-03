@@ -56,6 +56,10 @@ ci_agent = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Make the repo root importable so the `tests.` package prefix used by
+# cross-test imports resolves identically under bare `pytest` and
+# `python -m pytest` (Pre-Batch 8 cleanup).
+pythonpath = ["."]
 addopts = "-ra"
 markers = [
     "integration: end-to-end tests (may require live services; graceful skip when unavailable)",
@@ -79,6 +83,11 @@ select = ["E", "W", "F", "I", "B", "UP", "SIM", "C4", "RUF"]
 # instead of enum.StrEnum (documented in NOTES.md Section 5).
 "src/ci_agent/core/models/common.py" = ["UP042"]
 "src/ci_agent/orchestrator/run_state.py" = ["UP042"]
+# These suites import the Phase B orchestrator `env` fixture by name (pytest
+# resolves imported fixtures through the module namespace); their helper and
+# test parameters legitimately shadow that import binding.
+"tests/unit/test_orchestrator/test_spec_drift_guard.py" = ["F811"]
+"tests/unit/test_telemetry/test_wiring.py" = ["F811"]
 
 [tool.black]
 line-length = 100
