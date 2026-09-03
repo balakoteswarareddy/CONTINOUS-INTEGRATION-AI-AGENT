@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ci-agent/governance/schemas/exception_record.schema.json",
+  "title": "Governed security exception (waiver) record",
+  "description": "Validates serialized exception/waiver records (Batch 7, Task D; Sections 6 and 18). expires_at is REQUIRED — permanent exceptions cannot be expressed. Records are stored in the exception_records DB table; this schema governs their serialized/interchange form.",
+  "type": "object",
+  "required": ["id", "project_id", "policy_family", "reason", "granted_by", "granted_at", "expires_at", "status"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "pattern": "^exc-[0-9a-f-]{36}$" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "policy_family": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Governed policy family this exception covers (e.g. security_policy)."
+    },
+    "rule_id": {
+      "type": ["string", "null"],
+      "description": "Specific rule waived; null or '*' covers the whole family."
+    },
+    "reason": { "type": "string", "minLength": 1 },
+    "granted_by": { "type": "string", "minLength": 1 },
+    "granted_at": { "type": "string", "format": "date-time" },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "REQUIRED (Section 18: exceptions have expiration times). Must be after granted_at; enforced by the model validator."
+    },
+    "status": { "enum": ["active", "revoked", "expired"] },
+    "revoked_by": { "type": ["string", "null"] },
+    "revoked_at": { "type": ["string", "null"], "format": "date-time" }
+  }
+}

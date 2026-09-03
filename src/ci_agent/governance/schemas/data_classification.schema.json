@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ci-agent/governance/schemas/data_classification.schema.json",
+  "title": "Data classification catalog",
+  "description": "Validates catalog/data_classification.yaml — the data levels and Agent -> LLM provider rules (CI-Agent Production Architecture Report, Section 7.1).",
+  "type": "object",
+  "required": ["version", "levels"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+    },
+    "levels": {
+      "type": "array",
+      "minItems": 1,
+      "allOf": [
+        {
+          "description": "All four canonical classification levels must be defined.",
+          "contains": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "const": "public"
+              }
+            },
+            "required": ["name"]
+          }
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "const": "internal"
+              }
+            },
+            "required": ["name"]
+          }
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "const": "confidential"
+              }
+            },
+            "required": ["name"]
+          }
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "const": "restricted"
+              }
+            },
+            "required": ["name"]
+          }
+        }
+      ],
+      "items": {
+        "type": "object",
+        "required": ["name", "can_send_to_ai_model"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "enum": ["public", "internal", "confidential", "restricted"]
+          },
+          "can_send_to_ai_model": {
+            "type": "boolean"
+          },
+          "conditions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    }
+  }
+}

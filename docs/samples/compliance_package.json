@@ -1,0 +1,929 @@
+{
+  "approvals": [
+    {
+      "approver": "n/a (auto)",
+      "comment": null,
+      "created_at": "2026-09-03T00:00:00",
+      "decision": "approved"
+    }
+  ],
+  "audit_entries": [
+    {
+      "created_at": "2026-09-03T08:56:20.167032",
+      "entry_hash": "26dcb4fb6079135b226bab33165ed9f7c9c505e4c163c0ecaca735265790ca0e",
+      "event_type": "run_state_transition",
+      "id": 1,
+      "payload": {
+        "from": null,
+        "to": "trigger_validated"
+      },
+      "prev_hash": "GENESIS",
+      "run_id": "run-demo"
+    },
+    {
+      "created_at": "2026-09-03T08:56:20.188946",
+      "entry_hash": "900c5bf2fa4b291355a0f6dfa7792fbcab2d0f9476c0651727073346d477439e",
+      "event_type": "policy_decision",
+      "id": 2,
+      "payload": {
+        "decision": "pass",
+        "evaluation_id": "67966b1a-4ac8-4bda-8ddd-85c67664519a",
+        "families_evaluated": [
+          "identity_policy",
+          "tool_policy",
+          "build_policy",
+          "artifact_policy"
+        ],
+        "family_results": {
+          "artifact_policy": {
+            "artifact_policy": {
+              "registry_allowlist": [],
+              "require_sbom": true,
+              "require_signing": true,
+              "sbom_format": "spdx"
+            },
+            "artifacts": [],
+            "decision": "pass",
+            "failures": [],
+            "reasons": []
+          },
+          "build_policy": {
+            "build_policy": {
+              "allowed_base_images": [
+                "python:3.11-slim",
+                "node:20-slim"
+              ],
+              "allowed_egress_domains": [
+                "pypi.org",
+                "files.pythonhosted.org",
+                "registry.npmjs.org",
+                "github.com"
+              ],
+              "max_timeout_seconds": 3600
+            },
+            "decision": "pass",
+            "failures": [],
+            "reasons": [],
+            "runtime": {
+              "ai_invocation": null,
+              "approvals": [],
+              "base_images": [
+                "python:3.11-slim"
+              ],
+              "branch": "main",
+              "egress_domains": [],
+              "identity": null,
+              "repository": "example-org/payments-api",
+              "risk_tier": "low",
+              "scans_executed": [
+                "sast",
+                "sca",
+                "secret_scan"
+              ],
+              "step_timeout_seconds": 900,
+              "tools": [
+                {
+                  "container_image": null,
+                  "name": "git",
+                  "version": "2.43"
+                },
+                {
+                  "container_image": "python:3.11-slim",
+                  "name": "ruff",
+                  "version": "0.6.0"
+                },
+                {
+                  "container_image": "python:3.11-slim",
+                  "name": "bandit",
+                  "version": "1.7.9"
+                },
+                {
+                  "container_image": "python:3.11-slim",
+                  "name": "pytest",
+                  "version": "8.2.0"
+                },
+                {
+                  "container_image": "python:3.11-slim",
+                  "name": "gitleaks",
+                  "version": "8.18.2"
+                },
+                {
+                  "container_image": "python:3.11-slim",
+                  "name": "pip-audit",
+                  "version": "2.7.2"
+                },
+                {
+                  "container_image": null,
+                  "name": "internal.policy_gate",
+                  "version": "internal"
+                },
+                {
+                  "container_image": null,
+                  "name": "internal.human_approval",
+                  "version": "internal"
+                },
+                {
+                  "container_image": null,
+                  "name": "internal.merge_decision",
+                  "version": "internal"
+                }
+              ]
+            }
+          },
+          "identity_policy": {
+            "decision": "pass",
+            "failures": [],
+            "policy": {
+              "allowed_branches": [
+                "main",
+                "release/*",
+                "feature/*"
+              ],
+              "allowed_identities": [],
+              "allowed_repositories": [
+                "example-org/*"
+              ]
+            },
+            "reasons": [],
+            "repo_allowed": true,
+            "runtime": {
+              "ai_invocation": null,
+              "approvals": [],
+              "base_images": [
+                "python:3.11-slim"
+              ],
+              "branch": "main",
+              "egress_domains": [],
+              "identity": null,
+              "repository": "example-org/payments-api",
+              "risk_tier": "low",
+              "scans_executed": [
+                "sast",
+                "sca",
+                "secret_scan"
+              ],
+              "step_timeout_seconds": 900,
+              "tools": [
+                {
+                  "container_image": null,
+                  "name": "git",
+                  "version": "2.43"
+                },
+                {
+                  "container_image": "python:3.11-slim",
+                  "name": "ruff",
+                  "version": "0.6.0"
+                },
+                {
+                  "container_image": "python:3.11-slim",
+                  "name": "bandit",
+                  "version": "1.7.9"
+                },
+                {
+                  "container_image": "python:3.11-slim",
+                  "name": "pytest",
+                  "version": "8.2.0"
+                },
+                {
+                  "container_image": "python:3.11-slim",
+                  "name": "gitleaks",
+                  "version": "8.18.2"
+                },
+                {
+                  "container_image": "python:3.11-slim",
+                  "name": "pip-audit",
+                  "version": "2.7.2"
+                },
+                {
+                  "container_image": null,
+                  "name": "internal.policy_gate",
+                  "version": "internal"
+                },
+                {
+                  "container_image": null,
+                  "name": "internal.human_approval",
+                  "version": "internal"
+                },
+                {
+                  "container_image": null,
+                  "name": "internal.merge_decision",
+                  "version": "internal"
+                }
+              ]
+            }
+          },
+          "tool_policy": {
+            "approved_versions": {
+              "bandit": "1.7.9",
+              "eslint": "9.9.0",
+              "git": "2.43",
+              "gitleaks": "8.18.2",
+              "npm-audit": "10.8.0",
+              "pip-audit": "2.7.2",
+              "pytest": "8.2.0",
+              "ruff": "0.6.0",
+              "semgrep": "1.26.0",
+              "vitest": "2.0.5"
+            },
+            "decision": "pass",
+            "failures": [],
+            "policy": {
+              "approved_images": [
+                "python:3.11-slim",
+                "node:20-slim"
+              ],
+              "approved_tool_versions": {
+                "bandit": "1.7.9",
+                "eslint": "9.9.0",
+                "git": "2.43",
+                "gitleaks": "8.18.2",
+                "npm-audit": "10.8.0",
+                "pip-audit": "2.7.2",
+                "pytest": "8.2.0",
+                "ruff": "0.6.0",
+                "semgrep": "1.26.0",
+                "vitest": "2.0.5"
+              },
+              "forbidden_tools": []
+            },
+            "reasons": [],
+            "tools": [
+              {
+                "container_image": null,
+                "name": "git",
+                "version": "2.43"
+              },
+              {
+                "container_image": "python:3.11-slim",
+                "name": "ruff",
+                "version": "0.6.0"
+              },
+              {
+                "container_image": "python:3.11-slim",
+                "name": "bandit",
+                "version": "1.7.9"
+              },
+              {
+                "container_image": "python:3.11-slim",
+                "name": "pytest",
+                "version": "8.2.0"
+              },
+              {
+                "container_image": "python:3.11-slim",
+                "name": "gitleaks",
+                "version": "8.18.2"
+              },
+              {
+                "container_image": "python:3.11-slim",
+                "name": "pip-audit",
+                "version": "2.7.2"
+              }
+            ]
+          }
+        },
+        "opa_unavailable": false,
+        "policy_family": "aggregated",
+        "policy_version": "1.0.0",
+        "reasons": [],
+        "stage_id": "plan_approval"
+      },
+      "prev_hash": "26dcb4fb6079135b226bab33165ed9f7c9c505e4c163c0ecaca735265790ca0e",
+      "run_id": "run-demo"
+    },
+    {
+      "created_at": "2026-09-03T08:56:20.196742",
+      "entry_hash": "d377ed1efcafc39e10e6027d708a79d9f302416048ee6b6da92f724b9a9066f8",
+      "event_type": "run_dispatched",
+      "id": 3,
+      "payload": {
+        "dispatch_branch": "ci-agent/run-demo"
+      },
+      "prev_hash": "900c5bf2fa4b291355a0f6dfa7792fbcab2d0f9476c0651727073346d477439e",
+      "run_id": "run-demo"
+    },
+    {
+      "created_at": "2026-09-03T08:56:20.203742",
+      "entry_hash": "71adfaac0f89efd655a1228873b76872771516d2e84b1a05f9de68cccba38dfd",
+      "event_type": "stage_transition",
+      "id": 4,
+      "payload": {
+        "action": "created",
+        "changed": true,
+        "duration_ms": null,
+        "exit_code": 0,
+        "logs_ref": null,
+        "stage_id": "checkout",
+        "status": "passed"
+      },
+      "prev_hash": "d377ed1efcafc39e10e6027d708a79d9f302416048ee6b6da92f724b9a9066f8",
+      "run_id": "run-demo"
+    },
+    {
+      "created_at": "2026-09-03T08:56:20.208649",
+      "entry_hash": "e4b9b8df29a9553b211cc39771cac607a80b0466181e7d080bbd3d3f2ae5d64b",
+      "event_type": "run_state_transition",
+      "id": 5,
+      "payload": {
+        "from": "trigger_validated",
+        "reason": "stage 'checkout' passed",
+        "to": "checked_out"
+      },
+      "prev_hash": "71adfaac0f89efd655a1228873b76872771516d2e84b1a05f9de68cccba38dfd",
+      "run_id": "run-demo"
+    },
+    {
+      "created_at": "2026-09-03T08:56:20.213132",
+      "entry_hash": "4b0080ea955318d1790d12187f06461ae7b92ad527ccafe7960a3797310e3978",
+      "event_type": "stage_transition",
+      "id": 6,
+      "payload": {
+        "action": "created",
+        "changed": true,
+        "duration_ms": null,
+        "exit_code": 0,
+        "logs_ref": null,
+        "stage_id": "format_lint",
+        "status": "passed"
+      },
+      "prev_hash": "e4b9b8df29a9553b211cc39771cac607a80b0466181e7d080bbd3d3f2ae5d64b",
+      "run_id": "run-demo"
+    },
+    {
+      "created_at": "2026-09-03T08:56:20.217654",
+      "entry_hash": "bff95b0dc21c0c1a9e8d79cb8173e76deafd08bfaf7f706e8ac1b7c921b21b7b",
+      "event_type": "run_state_transition",
+      "id": 7,
+      "payload": {
+        "from": "checked_out",
+        "reason": "stage 'format_lint' passed",
+        "to": "baseline_validated"
+      },
+      "prev_hash": "4b0080ea955318d1790d12187f06461ae7b92ad527ccafe7960a3797310e3978",
+      "run_id": "run-demo"
+    },
+    {
+      "created_at": "2026-09-03T08:56:20.221377",
+      "entry_hash": "899fe81ac99adabac5fb85bf13f41e90bccd2266c19ad5e0888a2e41f21ec957",
+      "event_type": "run_state_transition",
+      "id": 8,
+      "payload": {
+        "from": "baseline_validated",
+        "reason": "chained state advance",
+        "to": "linted"
+      },
+      "prev_hash": "bff95b0dc21c0c1a9e8d79cb8173e76deafd08bfaf7f706e8ac1b7c921b21b7b",
+      "run_id": "run-demo"
+    },
+    {
+      "created_at": "2026-09-03T08:56:20.225518",
+      "entry_hash": "cca726ee00f5038830a8bd958b59cf027dd291f4411307b0cfd2a3e32a7d16c0",
+      "event_type": "stage_transition",
+      "id": 9,
+      "payload": {
+        "action": "created",
+        "changed": true,
+        "duration_ms": null,
+        "exit_code": 0,
+        "logs_ref": null,
+        "stage_id": "sast",
+        "status": "passed"
+      },
+      "prev_hash": "899fe81ac99adabac5fb85bf13f41e90bccd2266c19ad5e0888a2e41f21ec957",
+      "run_id": "run-demo"
+    },
+    {
+      "created_at": "2026-09-03T08:56:20.230086",
+      "entry_hash": "67fa906197edb55924c73374b78659e48ef2aede0c6159b7194423ed183b67ea",
+      "event_type": "run_state_transition",
+      "id": 10,
+      "payload": {
+        "from": "linted",
+        "reason": "stage 'sast' passed",
+        "to": "sast_done"
+      },
+      "prev_hash": "cca726ee00f5038830a8bd958b59cf027dd291f4411307b0cfd2a3e32a7d16c0",
+      "run_id": "run-demo"
+    },
+    {
+      "created_at": "2026-09-03T08:56:20.234739",
+      "entry_hash": "941be060f1ebaf0b04bf6ff1214093771026948aff62e411ac7ff68f43ff0a57",
+      "event_type": "stage_transition",
+      "id": 11,
+      "payload": {
+        "action": "created",
+        "changed": true,
+        "duration_ms": null,
+        "exit_code": 0,
+        "logs_ref": null,
+        "stage_id": "unit_tests",
+        "status": "passed"
+      },
+      "prev_hash": "67fa906197edb55924c73374b78659e48ef2aede0c6159b7194423ed183b67ea",
+      "run_id": "run-demo"
+    },
+    {
+      "created_at": "2026-09-03T08:56:20.239397",
+      "entry_hash": "9c6459e109c20195fe88b4120aba896f8cfe230df70d6aa8ec18f091e3b2c5dd",
+      "event_type": "run_state_transition",
+      "id": 12,
+      "payload": {
+        "from": "sast_done",
+        "reason": "stage 'unit_tests' passed",
+        "to": "tests_done"
+      },
+      "prev_hash": "941be060f1ebaf0b04bf6ff1214093771026948aff62e411ac7ff68f43ff0a57",
+      "run_id": "run-demo"
+    },
+    {
+      "created_at": "2026-09-03T08:56:20.243815",
+      "entry_hash": "3bc8b81861c94bd0dd49bdac54a04ea78c0c39ca847e8ed5a05a2d820b461d0e",
+      "event_type": "stage_transition",
+      "id": 13,
+      "payload": {
+        "action": "created",
+        "changed": true,
+        "duration_ms": null,
+        "exit_code": 0,
+        "logs_ref": null,
+        "stage_id": "secret_scan",
+        "status": "passed"
+      },
+      "prev_hash": "9c6459e109c20195fe88b4120aba896f8cfe230df70d6aa8ec18f091e3b2c5dd",
+      "run_id": "run-demo"
+    },
+    {
+      "created_at": "2026-09-03T08:56:20.248516",
+      "entry_hash": "4e1b2e7afb2e1bfafd78b78976069b59e705d4bf481db758cca7785ec4910b67",
+      "event_type": "run_state_transition",
+      "id": 14,
+      "payload": {
+        "from": "tests_done",
+        "reason": "stage 'secret_scan' passed",
+        "to": "security_checked"
+      },
+      "prev_hash": "3bc8b81861c94bd0dd49bdac54a04ea78c0c39ca847e8ed5a05a2d820b461d0e",
+      "run_id": "run-demo"
+    },
+    {
+      "created_at": "2026-09-03T08:56:20.251813",
+      "entry_hash": "a9e003a7de3a37ff430d1b93ec30c7ee6a272e8f43dedad24812c45ab1e1a958",
+      "event_type": "run_state_noop",
+      "id": 15,
+      "payload": {
+        "pending": [
+          "dependency_scan"
+        ],
+        "reason": "waiting for remaining pre-policy stages"
+      },
+      "prev_hash": "4e1b2e7afb2e1bfafd78b78976069b59e705d4bf481db758cca7785ec4910b67",
+      "run_id": "run-demo"
+    },
+    {
+      "created_at": "2026-09-03T08:56:20.256180",
+      "entry_hash": "e0645c807d128bdd71294cbad6f2b29b1673c57fdc0cbf0e08d9d414421195f9",
+      "event_type": "stage_transition",
+      "id": 16,
+      "payload": {
+        "action": "created",
+        "changed": true,
+        "duration_ms": null,
+        "exit_code": 0,
+        "logs_ref": null,
+        "stage_id": "dependency_scan",
+        "status": "passed"
+      },
+      "prev_hash": "a9e003a7de3a37ff430d1b93ec30c7ee6a272e8f43dedad24812c45ab1e1a958",
+      "run_id": "run-demo"
+    },
+    {
+      "created_at": "2026-09-03T08:56:20.261612",
+      "entry_hash": "699ebe4356579434e0e87047e4ca43ef52f21f020e83e9d8840ee3e96378aedf",
+      "event_type": "run_state_transition",
+      "id": 17,
+      "payload": {
+        "from": "security_checked",
+        "to": "policy_gate_eval"
+      },
+      "prev_hash": "e0645c807d128bdd71294cbad6f2b29b1673c57fdc0cbf0e08d9d414421195f9",
+      "run_id": "run-demo"
+    },
+    {
+      "created_at": "2026-09-03T08:56:20.277881",
+      "entry_hash": "be72c0efc6e8bf277b381a064a4512b7fff35fbc63d0a7a94ecc4ba04d591c46",
+      "event_type": "policy_decision",
+      "id": 18,
+      "payload": {
+        "decision": "pass",
+        "evaluation_id": "9c670c05-6e30-4eb7-8f65-9fd9da479144",
+        "families_evaluated": [
+          "identity_policy",
+          "tool_policy",
+          "security_policy",
+          "build_policy"
+        ],
+        "family_results": {
+          "build_policy": {
+            "build_policy": {
+              "allowed_base_images": [
+                "python:3.11-slim",
+                "node:20-slim"
+              ],
+              "allowed_egress_domains": [
+                "pypi.org",
+                "files.pythonhosted.org",
+                "registry.npmjs.org",
+                "github.com"
+              ],
+              "max_timeout_seconds": 3600
+            },
+            "decision": "pass",
+            "failures": [],
+            "reasons": [],
+            "runtime": {
+              "ai_invocation": null,
+              "approvals": [],
+              "base_images": [
+                "python:3.11-slim"
+              ],
+              "branch": "main",
+              "egress_domains": [],
+              "identity": null,
+              "repository": "example-org/payments-api",
+              "risk_tier": "low",
+              "scans_executed": [
+                "sast",
+                "sca",
+                "secret_scan"
+              ],
+              "step_timeout_seconds": 900,
+              "tools": [
+                {
+                  "container_image": null,
+                  "name": "git",
+                  "version": "2.43"
+                },
+                {
+                  "container_image": "python:3.11-slim",
+                  "name": "ruff",
+                  "version": "0.6.0"
+                },
+                {
+                  "container_image": "python:3.11-slim",
+                  "name": "bandit",
+                  "version": "1.7.9"
+                },
+                {
+                  "container_image": "python:3.11-slim",
+                  "name": "pytest",
+                  "version": "8.2.0"
+                },
+                {
+                  "container_image": "python:3.11-slim",
+                  "name": "gitleaks",
+                  "version": "8.18.2"
+                },
+                {
+                  "container_image": "python:3.11-slim",
+                  "name": "pip-audit",
+                  "version": "2.7.2"
+                },
+                {
+                  "container_image": null,
+                  "name": "internal.policy_gate",
+                  "version": "internal"
+                },
+                {
+                  "container_image": null,
+                  "name": "internal.human_approval",
+                  "version": "internal"
+                },
+                {
+                  "container_image": null,
+                  "name": "internal.merge_decision",
+                  "version": "internal"
+                }
+              ]
+            }
+          },
+          "identity_policy": {
+            "decision": "pass",
+            "failures": [],
+            "policy": {
+              "allowed_branches": [
+                "main",
+                "release/*",
+                "feature/*"
+              ],
+              "allowed_identities": [],
+              "allowed_repositories": [
+                "example-org/*"
+              ]
+            },
+            "reasons": [],
+            "repo_allowed": true,
+            "runtime": {
+              "ai_invocation": null,
+              "approvals": [],
+              "base_images": [
+                "python:3.11-slim"
+              ],
+              "branch": "main",
+              "egress_domains": [],
+              "identity": null,
+              "repository": "example-org/payments-api",
+              "risk_tier": "low",
+              "scans_executed": [
+                "sast",
+                "sca",
+                "secret_scan"
+              ],
+              "step_timeout_seconds": 900,
+              "tools": [
+                {
+                  "container_image": null,
+                  "name": "git",
+                  "version": "2.43"
+                },
+                {
+                  "container_image": "python:3.11-slim",
+                  "name": "ruff",
+                  "version": "0.6.0"
+                },
+                {
+                  "container_image": "python:3.11-slim",
+                  "name": "bandit",
+                  "version": "1.7.9"
+                },
+                {
+                  "container_image": "python:3.11-slim",
+                  "name": "pytest",
+                  "version": "8.2.0"
+                },
+                {
+                  "container_image": "python:3.11-slim",
+                  "name": "gitleaks",
+                  "version": "8.18.2"
+                },
+                {
+                  "container_image": "python:3.11-slim",
+                  "name": "pip-audit",
+                  "version": "2.7.2"
+                },
+                {
+                  "container_image": null,
+                  "name": "internal.policy_gate",
+                  "version": "internal"
+                },
+                {
+                  "container_image": null,
+                  "name": "internal.human_approval",
+                  "version": "internal"
+                },
+                {
+                  "container_image": null,
+                  "name": "internal.merge_decision",
+                  "version": "internal"
+                }
+              ]
+            }
+          },
+          "security_policy": {
+            "decision": "pass",
+            "exceeded_severities": [],
+            "missing_scans": [],
+            "reasons": [],
+            "required_scans": [
+              "sca",
+              "secret_scan"
+            ],
+            "scan_reasons": [],
+            "scans_executed": [
+              "sast",
+              "sca",
+              "secret_scan"
+            ],
+            "security_policy": {
+              "require_sca": true,
+              "require_secret_scan": true,
+              "severity_thresholds": {
+                "critical": 0,
+                "high": 0,
+                "low": 20,
+                "medium": 5
+              }
+            },
+            "severity_reasons": [],
+            "thresholds": {
+              "critical": 0,
+              "high": 0,
+              "low": 20,
+              "medium": 5
+            }
+          },
+          "tool_policy": {
+            "approved_versions": {
+              "bandit": "1.7.9",
+              "eslint": "9.9.0",
+              "git": "2.43",
+              "gitleaks": "8.18.2",
+              "npm-audit": "10.8.0",
+              "pip-audit": "2.7.2",
+              "pytest": "8.2.0",
+              "ruff": "0.6.0",
+              "semgrep": "1.26.0",
+              "vitest": "2.0.5"
+            },
+            "decision": "pass",
+            "failures": [],
+            "policy": {
+              "approved_images": [
+                "python:3.11-slim",
+                "node:20-slim"
+              ],
+              "approved_tool_versions": {
+                "bandit": "1.7.9",
+                "eslint": "9.9.0",
+                "git": "2.43",
+                "gitleaks": "8.18.2",
+                "npm-audit": "10.8.0",
+                "pip-audit": "2.7.2",
+                "pytest": "8.2.0",
+                "ruff": "0.6.0",
+                "semgrep": "1.26.0",
+                "vitest": "2.0.5"
+              },
+              "forbidden_tools": []
+            },
+            "reasons": [],
+            "tools": [
+              {
+                "container_image": null,
+                "name": "git",
+                "version": "2.43"
+              },
+              {
+                "container_image": "python:3.11-slim",
+                "name": "ruff",
+                "version": "0.6.0"
+              },
+              {
+                "container_image": "python:3.11-slim",
+                "name": "bandit",
+                "version": "1.7.9"
+              },
+              {
+                "container_image": "python:3.11-slim",
+                "name": "pytest",
+                "version": "8.2.0"
+              },
+              {
+                "container_image": "python:3.11-slim",
+                "name": "gitleaks",
+                "version": "8.18.2"
+              },
+              {
+                "container_image": "python:3.11-slim",
+                "name": "pip-audit",
+                "version": "2.7.2"
+              }
+            ]
+          }
+        },
+        "opa_unavailable": false,
+        "policy_family": "aggregated",
+        "policy_version": "1.0.0",
+        "reasons": [],
+        "stage_id": "policy_gate"
+      },
+      "prev_hash": "699ebe4356579434e0e87047e4ca43ef52f21f020e83e9d8840ee3e96378aedf",
+      "run_id": "run-demo"
+    },
+    {
+      "created_at": "2026-09-03T08:56:20.284322",
+      "entry_hash": "24060067d5b226e0afb33967c581ce7eba73fb8886bd577aee0c6c88ae8855ac",
+      "event_type": "run_state_transition",
+      "id": 19,
+      "payload": {
+        "from": "policy_gate_eval",
+        "to": "approved"
+      },
+      "prev_hash": "be72c0efc6e8bf277b381a064a4512b7fff35fbc63d0a7a94ecc4ba04d591c46",
+      "run_id": "run-demo"
+    },
+    {
+      "created_at": "2026-09-03T08:56:20.286904",
+      "entry_hash": "e4654419105d2ac1573eee7d2f0d4f30d8f15ec700343458e97ba790472519dd",
+      "event_type": "merge_decision_published",
+      "id": 20,
+      "payload": {
+        "approved": true,
+        "check_name": "ci-agent merge decision",
+        "conclusion": "success"
+      },
+      "prev_hash": "24060067d5b226e0afb33967c581ce7eba73fb8886bd577aee0c6c88ae8855ac",
+      "run_id": "run-demo"
+    },
+    {
+      "created_at": "2026-09-03T08:56:20.290744",
+      "entry_hash": "3c625c858592fdf687f5e58ff9d0b18f1cdc0b1a8fae6cf2e4edc7416edbe1cb",
+      "event_type": "run_state_transition",
+      "id": 21,
+      "payload": {
+        "from": "approved",
+        "to": "merge_decision_published"
+      },
+      "prev_hash": "e4654419105d2ac1573eee7d2f0d4f30d8f15ec700343458e97ba790472519dd",
+      "run_id": "run-demo"
+    }
+  ],
+  "evidence": {
+    "approvals": [],
+    "artifacts": [],
+    "attestations": [],
+    "findings": [],
+    "pipeline_hash": "36804eaebfcf8dd0b5a8b54feb0e8adbaf3c65c296d256531e10999cefbfcf8d",
+    "run_id": "run-demo",
+    "source_commit": "cafe1234",
+    "timestamps": {
+      "trigger_received_at": "2026-09-03T08:56:20.155936"
+    },
+    "tool_versions": {}
+  },
+  "generated_at": "2026-09-03T08:56:20.298702",
+  "policy_decisions": [
+    {
+      "decision": "pass",
+      "evaluated_at": "2026-09-03T08:56:20.191930",
+      "policy_family": "aggregated",
+      "policy_version": "1.0.0",
+      "reasons": [],
+      "stage_id": "plan_approval"
+    },
+    {
+      "decision": "pass",
+      "evaluated_at": "2026-09-03T08:56:20.280510",
+      "policy_family": "aggregated",
+      "policy_version": "1.0.0",
+      "reasons": [],
+      "stage_id": "policy_gate"
+    }
+  ],
+  "policy_version": "1.0.0",
+  "run_id": "run-demo",
+  "stage_records": [
+    {
+      "completed_at": null,
+      "duration_ms": null,
+      "exit_code": 0,
+      "logs_ref": null,
+      "stage_id": "checkout",
+      "started_at": null,
+      "status": "passed"
+    },
+    {
+      "completed_at": null,
+      "duration_ms": null,
+      "exit_code": 0,
+      "logs_ref": null,
+      "stage_id": "format_lint",
+      "started_at": null,
+      "status": "passed"
+    },
+    {
+      "completed_at": null,
+      "duration_ms": null,
+      "exit_code": 0,
+      "logs_ref": null,
+      "stage_id": "sast",
+      "started_at": null,
+      "status": "passed"
+    },
+    {
+      "completed_at": null,
+      "duration_ms": null,
+      "exit_code": 0,
+      "logs_ref": null,
+      "stage_id": "unit_tests",
+      "started_at": null,
+      "status": "passed"
+    },
+    {
+      "completed_at": null,
+      "duration_ms": null,
+      "exit_code": 0,
+      "logs_ref": null,
+      "stage_id": "secret_scan",
+      "started_at": null,
+      "status": "passed"
+    },
+    {
+      "completed_at": null,
+      "duration_ms": null,
+      "exit_code": 0,
+      "logs_ref": null,
+      "stage_id": "dependency_scan",
+      "started_at": null,
+      "status": "passed"
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+# Tool policy family (CI-Agent Production Architecture Report, Section 6 — Tool).
+#
+# Fail-closed posture: only tool@version pairs and container images explicitly
+# listed here may run; everything else is rejected (Planner raises
+# UnapprovedToolError; tool_policy.rego fails the gate).
+#
+# Batch 3 note: the entries below approve exactly the pinned tools/images used
+# by the Batch 3 planner stage templates (python.yaml / nodejs.yaml, Section
+# 5.1 Phase A). This supersedes the Batch 1 "empty approvals" default — the
+# deny-by-default rule itself is unchanged for anything not listed here.
+policy_version: "1.0.0"
+approved_tool_versions:
+  git: "2.43"
+  ruff: "0.6.0"
+  bandit: "1.7.9"
+  pytest: "8.2.0"
+  gitleaks: "8.18.2"
+  pip-audit: "2.7.2"
+  eslint: "9.9.0"
+  semgrep: "1.26.0"
+  vitest: "2.0.5"
+  npm-audit: "10.8.0"
+  # Batch 7 (Section 5.2 Phase B supply-chain stages).
+  build: "1.2.1"
+  npm: "10.8.0"
+  docker: "27.3.1"
+  syft: "1.18.1"
+  trivy: "0.58.0"
+  cosign: "2.4.1"
+approved_images:
+  - "python:3.11-slim"
+  - "node:20-slim"
+  - "docker:27.3.1-cli"
+  - "anchore/syft:v1.18.1"
+  - "aquasec/trivy:0.58.0"
+  - "sigstore/cosign:v2.4.1"
+forbidden_tools: []

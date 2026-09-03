@@ -1,0 +1,9 @@
+# AI policy family (CI-Agent Production Architecture Report, Sections 6 and 7.1).
+#
+# Deny-by-default posture: no model provider is approved yet, only public
+# data may ever reach a model provider, and a human override is required for
+# AI-produced outcomes. Mirrors catalog/data_classification.yaml.
+policy_version: "1.0.0"
+allowed_model_providers: []
+allowed_data_classification: [public]
+require_human_override: true

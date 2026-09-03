@@ -1,0 +1,49 @@
+{
+  "SchemaVersion": 2,
+  "CreatedAt": "2026-09-03T10:00:00Z",
+  "ArtifactName": "ci-agent/app:ci",
+  "ArtifactType": "container_image",
+  "Results": [
+    {
+      "Target": "ci-agent/app:ci (debian 12.2)",
+      "Class": "os-pkgs",
+      "Type": "debian",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2023-0286",
+          "PkgName": "libssl3",
+          "InstalledVersion": "3.0.11-1~deb12u1",
+          "FixedVersion": "3.0.13-1~deb12u1",
+          "Severity": "HIGH",
+          "Title": "openssl: X.400 address type confusion in X.509 GENERAL_NAME",
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2023-0286"
+        },
+        {
+          "VulnerabilityID": "CVE-2023-5363",
+          "PkgName": "libssl3",
+          "InstalledVersion": "3.0.11-1~deb12u1",
+          "FixedVersion": "3.0.13-1~deb12u1",
+          "Severity": "UNKNOWN",
+          "Title": "Incorrect cipher key length in EVP_CipherInit_ex",
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2023-5363"
+        }
+      ]
+    },
+    {
+      "Target": "Python",
+      "Class": "lang-pkgs",
+      "Type": "pip",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2024-9999",
+          "PkgName": "requests",
+          "InstalledVersion": "2.30.0",
+          "FixedVersion": "2.32.0",
+          "Severity": "MEDIUM",
+          "Title": "requests: certificate verification bypass",
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2024-9999"
+        }
+      ]
+    }
+  ]
+}

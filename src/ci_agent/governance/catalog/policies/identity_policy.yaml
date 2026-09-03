@@ -1,0 +1,19 @@
+# Identity policy family (CI-Agent Production Architecture Report, Section 6 — Identity).
+#
+# COMMITTED DEFAULT: DENY EVERYTHING (Section 7 fail-closed posture).
+#
+# These allowlists are intentionally EMPTY. Only repositories/branches matching
+# these glob patterns may run pipelines — with the patterns empty, the ingress
+# rejects every webhook with an audited 403 and the PDP's identity policy
+# fails every plan_approval. This is the safe shipped default: an operator
+# MUST explicitly scope `allowed_repositories` / `allowed_branches` to their
+# environment before any real repository can trigger a pipeline.
+#
+# A working example allowlist for local development only lives in
+# catalog/policies/examples/identity_policy.local-dev.yaml — it is loaded
+# ONLY when CI_AGENT_ENV=local and a loud warning is logged at startup.
+# Never copy it into a shared/deployed environment as-is.
+policy_version: "1.0.0"
+allowed_repositories: []
+allowed_branches: []
+allowed_identities: []

@@ -1,0 +1,28 @@
+# Build policy family (CI-Agent Production Architecture Report, Section 6 — Build).
+#
+# Fail-closed posture: builds may only use allowlisted base images, contact
+# allowlisted egress domains, and must respect the timeout ceiling.
+#
+# Batch 3 note: base images now cover the Batch 3 planner templates
+# (python:3.11-slim / node:20-slim) and egress covers the package registries
+# those toolchains need. Anything unlisted remains denied.
+policy_version: "1.0.0"
+allowed_base_images:
+  - "python:3.11-slim"
+  - "node:20-slim"
+  # Batch 7 (Section 5.2 Phase B job images — pinned; still deny-by-default
+  # for anything unlisted).
+  - "docker:27.3.1-cli"
+  - "anchore/syft:v1.18.1"
+  - "aquasec/trivy:0.58.0"
+  - "sigstore/cosign:v2.4.1"
+allowed_egress_domains:
+  - "pypi.org"
+  - "files.pythonhosted.org"
+  - "registry.npmjs.org"
+  - "github.com"
+  # Batch 7: container registry + sigstore infrastructure for sign/attest.
+  - "registry-1.docker.io"
+  - "ghcr.io"
+  - "sigstore.dev"
+max_timeout_seconds: 3600

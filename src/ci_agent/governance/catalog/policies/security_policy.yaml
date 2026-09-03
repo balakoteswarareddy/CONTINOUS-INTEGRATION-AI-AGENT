@@ -1,0 +1,12 @@
+# Security policy family (CI-Agent Production Architecture Report, Section 6 — Security).
+#
+# Conservative defaults: zero tolerance for critical/high findings, and both
+# secret scanning and SCA are mandatory.
+policy_version: "1.0.0"
+severity_thresholds:
+  critical: 0
+  high: 0
+  medium: 5
+  low: 20
+require_secret_scan: true
+require_sca: true

@@ -1,0 +1,365 @@
+# CI Agent intake questionnaire definition (Batch 1, Task C).
+#
+# Encodes the Section 2 customer inputs and the Section 14 intake table of the
+# CI-Agent Production Architecture Report as a versioned, machine-readable
+# schema. This file defines WHAT must be asked during project intake — not the
+# answers. Answers collected against this questionnaire drive generation of the
+# PipelineSpec and the risk-tier-dependent policy families.
+version: "1.0.0"
+sections:
+  - id: project_classification
+    title: Project Classification
+    description: Business criticality, data sensitivity and regulatory scope used to derive the project risk tier (Report Section 14).
+    questions:
+      - id: business_criticality
+        type: enum
+        options: [low, medium, high, critical]
+        required: true
+        description: How critical is this project to the business?
+      - id: data_sensitivity
+        type: enum
+        options: [public, internal, confidential, restricted]
+        required: true
+        description: Highest sensitivity classification of data this project handles.
+      - id: regulatory_scope
+        type: string
+        required: false
+        description: Comma-separated regulatory regimes that apply (e.g. PCI-DSS, HIPAA, SOC 2). Leave empty if none.
+      - id: derived_risk_tier
+        type: enum
+        options: [low, medium, high, regulated]
+        required: true
+        description: Risk tier agreed during intake; drives approval_policy.require_human_approval_for.
+
+  - id: repository_topology
+    title: Repository Topology
+    questions:
+      - id: repo_structure
+        type: enum
+        options: [single_repo, monorepo, multi_repo]
+        required: true
+        description: How the project's source is organized across repositories.
+      - id: repository_url
+        type: string
+        required: true
+        description: Canonical clone URL of the primary repository.
+      - id: default_branch
+        type: string
+        required: true
+        description: Default branch (e.g. main) that release artifacts build from.
+      - id: protected_branches
+        type: string_list
+        required: true
+        description: Branch patterns protected by policy; only allowlisted identities may run on them.
+
+  - id: execution_locations
+    title: Execution Locations
+    questions:
+      - id: primary_execution_location
+        type: enum
+        options: [github_hosted, self_hosted_cloud, self_hosted_onprem, hybrid]
+        required: true
+        description: Where CI workloads primarily execute.
+      - id: execution_regions
+        type: string_list
+        required: false
+        description: Cloud regions runners execute in, when relevant.
+      - id: requires_dedicated_runners
+        type: boolean
+        required: true
+        description: Must this project use dedicated (isolated) runners?
+
+  - id: identity_model
+    title: Identity Model
+    questions:
+      - id: identity_provider
+        type: enum
+        options: [github_actions_oidc, cloud_workload_identity, static_credentials, other]
+        required: true
+        description: How the pipeline authenticates to external systems.
+      - id: federated_identity_only
+        type: boolean
+        required: true
+        description: Are short-lived federated identities mandatory (no static secrets)?
+      - id: allowed_identities
+        type: string_list
+        required: true
+        description: Identity references allowed to execute this project's pipelines (mirrors identity_policy.allowed_identities).
+      - id: service_accounts
+        type: string_list
+        required: false
+        description: Named service accounts used by the pipeline, if any.
+
+  - id: network_policy
+    title: Network Policy
+    questions:
+      - id: default_egress_posture
+        type: enum
+        options: [deny_all, allowlist, allow_all]
+        required: true
+        description: Default network egress posture for build steps (mirrors build_policy).
+      - id: allowed_egress_domains
+        type: string_list
+        required: true
+        description: Domains builds may contact; empty list means no egress allowed (mirrors build_policy.allowed_egress_domains).
+      - id: requires_private_networking
+        type: boolean
+        required: true
+        description: Do builds need private network access (VPC/private link)?
+
+  - id: artifact_lifecycle
+    title: Artifact Lifecycle
+    questions:
+      - id: artifact_retention_days
+        type: integer
+        required: true
+        description: How long build artifacts are retained before expiry.
+      - id: promote_to_release_registry
+        type: boolean
+        required: true
+        description: Are artifacts promoted to a release registry after policy checks pass?
+      - id: require_immutable_tags
+        type: boolean
+        required: true
+        description: Must registry tags be immutable (digest-pinned promotion only)?
+      - id: provenance_attestations_required
+        type: boolean
+        required: true
+        description: Are provenance attestations required for promoted artifacts (feeds EvidenceModel.attestations)?
+
+  - id: exception_management
+    title: Exception Management
+    questions:
+      - id: exception_process_owner
+        type: string
+        required: true
+        description: Team/role that owns policy exception approvals.
+      - id: max_exception_validity_days
+        type: integer
+        required: true
+        description: Maximum number of days an exception/waiver stays valid before expiry.
+      - id: waivers_allowed
+        type: boolean
+        required: true
+        description: May policy findings be waived at all (PolicyDecision.waived)?
+
+  - id: model_data_policy
+    title: Model & Data Policy
+    description: Which data may reach an AI model provider (Report Sections 6 and 7.1).
+    questions:
+      - id: default_data_classification
+        type: enum
+        options: [public, internal, confidential, restricted]
+        required: true
+        description: Default classification applied to project content sent to AI providers.
+      - id: ai_assistance_allowed
+        type: boolean
+        required: true
+        description: May the CI Agent invoke AI model providers for this project at all?
+      - id: approved_model_providers
+        type: string_list
+        required: true
+        description: AI model providers approved for this project (mirrors ai_policy.allowed_model_providers).
+      - id: human_override_required
+        type: boolean
+        required: true
+        description: Must a human approve AI-produced changes/decisions before they take effect (mirrors ai_policy.require_human_override)?
+
+  - id: slos
+    title: Service Level Objectives
+    questions:
+      - id: pipeline_duration_target_minutes
+        type: integer
+        required: true
+        description: Target end-to-end pipeline duration in minutes.
+      - id: max_allowed_queue_minutes
+        type: integer
+        required: true
+        description: Maximum acceptable queue wait before a run starts.
+      - id: ci_availability_target_percent
+        type: number
+        required: true
+        description: Monthly CI availability target percentage (e.g. 99.5).
+
+  - id: operational_ownership
+    title: Operational Ownership
+    questions:
+      - id: owning_team
+        type: string
+        required: true
+        description: Team that owns this project's CI configuration and policies.
+      - id: owning_team_channel
+        type: string
+        required: true
+        description: Chat/mailing channel for CI notifications.
+      - id: escalation_contact
+        type: string
+        required: false
+        description: Contact for escalations when the owning team is unresponsive.
+      - id: on_call_rotation
+        type: string
+        required: false
+        description: On-call schedule reference, if the project has one.
+
+  - id: runner
+    title: Runner Requirements
+    questions:
+      - id: runner_os
+        type: enum
+        options: [linux, windows, macos]
+        required: true
+        description: Operating system required for the primary build runner.
+      - id: runner_architecture
+        type: enum
+        options: [x86_64, arm64]
+        required: true
+        description: CPU architecture required for the primary build runner.
+      - id: runner_provisioning
+        type: enum
+        options: [on_demand, autoscaled, static_pool]
+        required: true
+        description: How runner capacity is provisioned.
+      - id: preferred_runner_labels
+        type: string_list
+        required: false
+        description: Runner labels this project prefers to schedule on.
+
+  - id: language_stack
+    title: Language & Stack
+    questions:
+      - id: primary_language
+        type: string
+        required: true
+        description: Primary implementation language (fills StackInfo.language).
+      - id: primary_language_version
+        type: string
+        required: false
+        description: Pinned language/toolchain version (fills StackInfo.version).
+      - id: primary_framework
+        type: string
+        required: false
+        description: Primary framework, if any (fills StackInfo.framework).
+      - id: package_manager
+        type: string
+        required: false
+        description: Package/dependency manager used (e.g. pip, npm, cargo).
+
+  - id: architecture
+    title: Architecture
+    questions:
+      - id: deployment_architecture
+        type: enum
+        options: [monolith, microservices, serverless, hybrid]
+        required: true
+        description: Overall deployment architecture of the project.
+      - id: containerized_workload
+        type: boolean
+        required: true
+        description: Is the workload delivered as containers?
+      - id: base_images
+        type: string_list
+        required: true
+        description: Base images the project builds from (mirrors build_policy.allowed_base_images).
+
+  - id: security_tools
+    title: Security Tooling
+    questions:
+      - id: sast_tool
+        type: string
+        required: false
+        description: Static analysis (SAST) tool used by the project.
+      - id: sca_tool
+        type: string
+        required: false
+        description: Software-composition-analysis tool used (relates to security_policy.require_sca).
+      - id: secret_scanning_tool
+        type: string
+        required: false
+        description: Secret-scanning tool used (relates to security_policy.require_secret_scan).
+      - id: container_image_scanner
+        type: string
+        required: false
+        description: Container image vulnerability scanner used.
+      - id: dast_tool
+        type: string
+        required: false
+        description: Dynamic analysis (DAST) tool used, if any.
+
+  - id: secret_storage
+    title: Secret Storage
+    questions:
+      - id: secrets_provider
+        type: enum
+        options: [github_actions_secrets, hashicorp_vault, aws_secrets_manager, azure_key_vault, gcp_secret_manager, other]
+        required: true
+        description: Where pipeline secrets are stored.
+      - id: short_lived_credentials_only
+        type: boolean
+        required: true
+        description: Are only short-lived/dynamically-issued credentials permitted?
+
+  - id: coverage_requirements
+    title: Coverage Requirements
+    questions:
+      - id: minimum_coverage_percent
+        type: number
+        required: true
+        description: Minimum test coverage percentage (feeds PipelineSpec.thresholds).
+      - id: coverage_enforced_as_gate
+        type: boolean
+        required: true
+        description: Is coverage a hard gate (fail the pipeline) or advisory?
+      - id: coverage_tool
+        type: string
+        required: false
+        description: Coverage measurement tool used.
+
+  - id: artifact_repository
+    title: Artifact Repository
+    questions:
+      - id: artifact_registry_type
+        type: enum
+        options: [github_packages, artifactory, nexus, aws_ecr, gcp_artifact_registry, azure_acr, other]
+        required: true
+        description: Type of registry artifacts are published to.
+      - id: artifact_registry_url
+        type: string
+        required: false
+        description: Registry URL (mirrors artifact_policy.registry_allowlist entries).
+      - id: sbom_required
+        type: boolean
+        required: true
+        description: Is an SBOM required for built artifacts (mirrors artifact_policy.require_sbom)?
+      - id: sbom_format
+        type: enum
+        options: [spdx, cyclonedx]
+        required: false
+        description: Required SBOM format (mirrors artifact_policy.sbom_format).
+      - id: artifact_signing_required
+        type: boolean
+        required: true
+        description: Must artifacts be cryptographically signed (mirrors artifact_policy.require_signing)?
+
+  - id: testing_strategy
+    title: Testing Strategy
+    questions:
+      - id: unit_testing_required
+        type: boolean
+        required: true
+        description: Is a unit-test stage mandatory?
+      - id: integration_testing_required
+        type: boolean
+        required: true
+        description: Is an integration-test stage mandatory?
+      - id: e2e_testing_required
+        type: boolean
+        required: false
+        description: Is an end-to-end test stage mandatory?
+      - id: primary_test_framework
+        type: string
+        required: false
+        description: Primary test framework used.
+      - id: test_results_published
+        type: boolean
+        required: false
+        description: Are test results published as build reports?

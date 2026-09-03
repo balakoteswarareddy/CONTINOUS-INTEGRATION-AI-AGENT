@@ -1,0 +1,181 @@
+# Python stage template (Batch 3, Task B; Report Section 5.1 Phase A stages).
+#
+# The Planner resolves these entries into ExecutionPlan ResolvedSteps.
+# Tool name/version pairs MUST be approved in governance tool_policy.yaml —
+# an unapproved pair makes Planner.build_execution_plan raise
+# UnapprovedToolError (Section 18: "the model may propose, but policy approves").
+#
+# Control-flow stages (policy_gate, human_approval, merge_decision) are
+# represented as internal.* steps with no container image per the batch spec.
+stack: python
+stages:
+  - stage_id: checkout
+    tool_name: git
+    tool_version: "2.43"
+    container_image: null
+    command_template_id: "checkout.default"
+    timeout_seconds: 120
+    retryable: true
+    max_retries: 2
+
+  - stage_id: format_lint
+    tool_name: ruff
+    tool_version: "0.6.0"
+    container_image: "python:3.11-slim"
+    command_template_id: "lint.ruff"
+    timeout_seconds: 300
+    retryable: false
+    max_retries: 0
+
+  - stage_id: sast
+    tool_name: bandit
+    tool_version: "1.7.9"
+    container_image: "python:3.11-slim"
+    command_template_id: "sast.bandit"
+    timeout_seconds: 600
+    retryable: false
+    max_retries: 0
+
+  - stage_id: unit_tests
+    tool_name: pytest
+    tool_version: "8.2.0"
+    container_image: "python:3.11-slim"
+    command_template_id: "tests.pytest"
+    timeout_seconds: 900
+    retryable: true
+    max_retries: 1
+
+  - stage_id: secret_scan
+    tool_name: gitleaks
+    tool_version: "8.18.2"
+    container_image: "python:3.11-slim"
+    command_template_id: "scan.gitleaks"
+    timeout_seconds: 300
+    retryable: false
+    max_retries: 0
+
+  - stage_id: dependency_scan
+    tool_name: pip-audit
+    tool_version: "2.7.2"
+    container_image: "python:3.11-slim"
+    command_template_id: "scan.pip-audit"
+    timeout_seconds: 600
+    retryable: false
+    max_retries: 0
+
+  # --- Control-flow stages (Section 5.1): gates, not tool executions. ---
+  - stage_id: policy_gate
+    tool_name: internal.policy_gate
+    tool_version: "internal"
+    container_image: null
+    command_template_id: "internal.policy_gate"
+    timeout_seconds: 60
+    retryable: false
+    max_retries: 0
+
+  - stage_id: human_approval
+    tool_name: internal.human_approval
+    tool_version: "internal"
+    container_image: null
+    command_template_id: "internal.human_approval"
+    timeout_seconds: 60
+    retryable: false
+    max_retries: 0
+
+  - stage_id: merge_decision
+    tool_name: internal.merge_decision
+    tool_version: "internal"
+    container_image: null
+    command_template_id: "internal.merge_decision"
+    timeout_seconds: 60
+    retryable: false
+    max_retries: 0
+
+  # --- Phase B (Batch 7; Report Section 5.2 nine-stage supply-chain flow) ---
+  # Same ResolvedStep shape and approval rules as Phase A: every tool@version
+  # must be approved in tool_policy.yaml and every command_template_id must
+  # exist verbatim in command_templates.yaml (Section 7.3 allow-list only).
+  - stage_id: full_build
+    tool_name: build
+    tool_version: "1.2.1"
+    container_image: "python:3.11-slim"
+    command_template_id: "build.default.python"
+    timeout_seconds: 1200
+    retryable: false
+    max_retries: 0
+
+  - stage_id: integration_tests
+    tool_name: pytest
+    tool_version: "8.2.0"
+    container_image: "python:3.11-slim"
+    command_template_id: "test.integration.python"
+    timeout_seconds: 1200
+    retryable: false
+    max_retries: 0
+
+  # Internal stage: the control plane evaluates coverage against the
+  # PipelineSpec.thresholds (fail-closed when coverage data is missing).
+  - stage_id: coverage_gate
+    tool_name: internal.coverage_gate
+    tool_version: "internal"
+    container_image: null
+    command_template_id: "internal.coverage_gate"
+    timeout_seconds: 60
+    retryable: false
+    max_retries: 0
+
+  - stage_id: container_build
+    tool_name: docker
+    tool_version: "27.3.1"
+    container_image: "docker:27.3.1-cli"
+    command_template_id: "container.build"
+    timeout_seconds: 1800
+    retryable: false
+    max_retries: 0
+
+  - stage_id: sbom_generate
+    tool_name: syft
+    tool_version: "1.18.1"
+    container_image: "anchore/syft:v1.18.1"
+    command_template_id: "sbom.syft"
+    timeout_seconds: 600
+    retryable: false
+    max_retries: 0
+
+  - stage_id: image_scan
+    tool_name: trivy
+    tool_version: "0.58.0"
+    container_image: "aquasec/trivy:0.58.0"
+    command_template_id: "scan.trivy"
+    timeout_seconds: 900
+    retryable: false
+    max_retries: 0
+
+  - stage_id: sign_attest
+    tool_name: cosign
+    tool_version: "2.4.1"
+    container_image: "sigstore/cosign:v2.4.1"
+    command_template_id: "sign.cosign"
+    timeout_seconds: 600
+    retryable: false
+    max_retries: 0
+
+  - stage_id: publish
+    tool_name: docker
+    tool_version: "27.3.1"
+    container_image: "docker:27.3.1-cli"
+    command_template_id: "publish.oci"
+    timeout_seconds: 900
+    retryable: false
+    max_retries: 0
+
+  # Internal stage: the control plane persists the EvidenceModel artifacts +
+  # attestations when the run lands (populates EvidenceModel for real).
+  - stage_id: record_evidence
+    tool_name: internal.record_evidence
+    tool_version: "internal"
+    container_image: null
+    command_template_id: "internal.record_evidence"
+    timeout_seconds: 60
+    retryable: false
+    max_retries: 0

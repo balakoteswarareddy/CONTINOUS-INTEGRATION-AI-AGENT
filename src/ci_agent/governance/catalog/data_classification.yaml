@@ -1,0 +1,18 @@
+# Data classification catalog (Batch 1, Task C).
+#
+# Encodes the Agent -> LLM provider data rules from the CI-Agent Production
+# Architecture Report, Section 7.1: "Agent -> LLM provider ... no raw secrets
+# ... unless explicitly permitted by data-classification policy". The Policy
+# Engine (later batch) consults this catalog before any content is sent to a
+# model provider.
+version: "1.0.0"
+levels:
+  - name: public
+    can_send_to_ai_model: true
+  - name: internal
+    can_send_to_ai_model: true
+    conditions: ["must be normalized/anonymized"]
+  - name: confidential
+    can_send_to_ai_model: false
+  - name: restricted
+    can_send_to_ai_model: false

@@ -1,0 +1,7 @@
+{
+  "dependencies": [
+    {"name": "requests", "version": "2.31.0", "vulns": [], "skips": []},
+    {"name": "flask", "version": "3.0.0", "vulns": [], "skips": []}
+  ],
+  "fixes": []
+}

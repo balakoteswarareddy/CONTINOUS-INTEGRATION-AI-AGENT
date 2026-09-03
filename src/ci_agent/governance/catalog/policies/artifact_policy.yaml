@@ -1,0 +1,13 @@
+# Artifact policy family (CI-Agent Production Architecture Report, Section 6 — Artifact).
+#
+# Conservative defaults: SBOM + signing are mandatory and promotion is only
+# possible to explicitly allowlisted registries.
+policy_version: "1.0.0"
+require_sbom: true
+sbom_format: spdx
+require_signing: true
+# Batch 7: registries the publish stage may target (Section 6 — allowlist
+# only; anything unlisted stays denied). MVP dev defaults; production narrows.
+registry_allowlist:
+  - "registry-1.docker.io"
+  - "ghcr.io"

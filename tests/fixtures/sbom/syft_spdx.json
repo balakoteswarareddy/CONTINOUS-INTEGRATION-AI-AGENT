@@ -1,0 +1,14 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "ci-agent-app",
+  "documentNamespace": "https://anchore.com/syft/image/ci-agent-app-abc123",
+  "creationInfo": {"licenseListVersion": "3.21", "creators": ["Organization: Anchore, Inc", "Tool: syft-1.18.1"], "created": "2026-09-03T10:00:00Z"},
+  "packages": [
+    {"name": "requests", "SPDXID": "SPDXRef-Package-pip-requests", "versionInfo": "2.30.0", "supplier": "NOASSERTION", "downloadLocation": "NOASSERTION", "filesAnalyzed": false, "licenseConcluded": "Apache-2.0", "licenseDeclared": "Apache-2.0", "externalRefs": [{"referenceCategory": "PACKAGE-MANAGER", "referenceType": "purl", "referenceLocator": "pkg:pypi/requests@2.30.0"}]},
+    {"name": "urllib3", "SPDXID": "SPDXRef-Package-pip-urllib3", "versionInfo": "2.2.1", "supplier": "NOASSERTION", "downloadLocation": "NOASSERTION", "filesAnalyzed": false, "licenseConcluded": "MIT", "licenseDeclared": "MIT", "externalRefs": [{"referenceCategory": "PACKAGE-MANAGER", "referenceType": "purl", "referenceLocator": "pkg:pypi/urllib3@2.2.1"}]},
+    {"name": "libssl3", "SPDXID": "SPDXRef-Package-deb-libssl3", "versionInfo": "3.0.11-1~deb12u1", "supplier": "NOASSERTION", "downloadLocation": "NOASSERTION", "filesAnalyzed": false, "licenseConcluded": "NOASSERTION", "licenseDeclared": "NOASSERTION"}
+  ],
+  "relationships": [{"spdxElementId": "SPDXRef-DOCUMENT", "relationshipType": "DESCRIBES", "relatedSpdxElement": "SPDXRef-Package-pip-requests"}]
+}
