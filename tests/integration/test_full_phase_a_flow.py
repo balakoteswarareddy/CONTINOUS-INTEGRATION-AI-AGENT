@@ -123,7 +123,7 @@ def env(tmp_path):
     session_factory = get_session_factory(engine)
     audit_store = AuditStore(session_factory)
     registry = ProjectRegistry(session_factory)
-    policy_spec = load_policy_spec()
+    policy_spec = load_policy_spec(local_dev_override=True)
     planner = Planner(TemplateRegistry(), policy_spec)
     opa_client = OPAClient("http://127.0.0.1:8181", 2.0)
     pdp = PolicyDecisionPoint(opa_client, audit_store, policy_spec, session_factory=session_factory)

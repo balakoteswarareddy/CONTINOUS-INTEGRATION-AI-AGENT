@@ -32,6 +32,12 @@ SCHEMAS_DIR: Path = Path(__file__).resolve().parent / "schemas"
 CATALOG_DIR: Path = Path(__file__).resolve().parent / "catalog"
 POLICIES_DIR: Path = CATALOG_DIR / "policies"
 
+# Batch 5.1 (Item 2): the committed identity_policy.yaml denies everything.
+# This clearly-named example file carries the local-development allowlist and
+# may ONLY be loaded when CI_AGENT_ENV=local (enforced by callers; see
+# ci_agent.ingress.app.create_app, which also logs a loud warning).
+LOCAL_DEV_IDENTITY_POLICY_REL: str = "examples/identity_policy.local-dev.yaml"
+
 POLICY_FILE_NAMES: tuple[str, ...] = (
     "identity_policy",
     "tool_policy",
@@ -134,6 +140,19 @@ def load_provider_matrix() -> dict[str, Any]:
     return _load_validated("provider_matrix.yaml", "provider_matrix", CATALOG_DIR)
 
 
+def load_identity_policy(local_dev_override: bool = False) -> dict[str, Any]:
+    """Load the identity policy family (Report Section 6 — Identity).
+
+    Default: the COMMITTED file, which ships deny-everything (empty
+    allowlists) since Batch 5.1. ``local_dev_override=True`` loads the
+    clearly-marked ``examples/identity_policy.local-dev.yaml`` instead —
+    callers may only pass True for ``CI_AGENT_ENV=local``.
+    """
+    if local_dev_override:
+        return _load_validated(LOCAL_DEV_IDENTITY_POLICY_REL, "policy_file", POLICIES_DIR)
+    return load_policy_file("identity_policy")
+
+
 def load_policy_file(name: str) -> dict[str, Any]:
     """Load one policy-family file from ``catalog/policies/`` (Report Section 6).
 
@@ -170,14 +189,20 @@ def load_org_policy_version() -> str:
     return versions.pop()
 
 
-def load_policy_spec() -> PolicySpec:
+def load_policy_spec(local_dev_override: bool = False) -> PolicySpec:
     """Compile the 7 governed policy-family files into one PolicySpec (Batch 3).
 
     All files must agree on ``policy_version``. This is the org-wide governed
     contract the Policy Decision Point evaluates against (per-project overrides
     are a documented future capability, see NOTES.md).
+
+    ``local_dev_override=True`` swaps in the local-development identity
+    allowlist (see :func:`load_identity_policy`); every other family is
+    unaffected. Callers may only pass True for ``CI_AGENT_ENV=local``.
     """
     loaded = load_all_policy_files()
+    if local_dev_override:
+        loaded["identity_policy"] = load_identity_policy(local_dev_override=True)
     versions = {str(data["policy_version"]) for data in loaded.values()}
     if len(versions) != 1:
         detail = ", ".join(

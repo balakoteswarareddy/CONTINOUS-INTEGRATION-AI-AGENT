@@ -26,6 +26,7 @@ from ci_agent.governance import (
     POLICY_FILE_NAMES,
     GovernanceError,
     load_data_classification,
+    load_identity_policy,
     load_intake_schema,
     load_policy_file,
     load_provider_matrix,
@@ -42,6 +43,16 @@ def main() -> int:
         (f"catalog/policies/{name}.yaml", partial(load_policy_file, name))
         for name in POLICY_FILE_NAMES
     )
+    # Batch 5.1: the local-dev override example must stay schema-valid too.
+    checks.append(
+        (
+            "catalog/policies/examples/identity_policy.local-dev.yaml",
+            partial(load_identity_policy, True),
+        )
+    )
+    # The COMMITTED identity policy must remain deny-everything — a permissive
+    # committed default is a Batch 5.1 regression and fails validation here.
+    committed_identity = partial(load_identity_policy, False)
 
     failures: list[str] = []
     for label, load in checks:
@@ -53,6 +64,20 @@ def main() -> int:
             print(f"      {exc}")
         else:
             print(f"PASS  {label}")
+
+    try:
+        committed = committed_identity()
+        if committed.get("allowed_repositories") or committed.get("allowed_branches"):
+            failures.append("catalog/policies/identity_policy.yaml (not deny-by-default)")
+            print(
+                "FAIL  catalog/policies/identity_policy.yaml (committed default must "
+                "have EMPTY allowed_repositories/allowed_branches — Batch 5.1)"
+            )
+        else:
+            print("PASS  catalog/policies/identity_policy.yaml is deny-by-default")
+    except GovernanceError as exc:
+        failures.append("catalog/policies/identity_policy.yaml")
+        print(f"FAIL  catalog/policies/identity_policy.yaml\n      {exc}")
 
     total = len(checks)
     print(f"\n{total - len(failures)}/{total} governance files valid.")

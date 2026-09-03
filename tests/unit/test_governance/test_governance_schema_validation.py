@@ -162,7 +162,8 @@ class TestProviderMatrixSchemaValidation:
 
 
 class TestValidateGovernanceCli:
-    def test_cli_exits_zero_and_reports_all_ten_files(self) -> None:
+    def test_cli_exits_zero_and_reports_all_files(self) -> None:
+        """3 catalog + 7 policy + 1 local-dev example + deny-default check = 12 PASS."""
         result = subprocess.run(
             [sys.executable, str(VALIDATE_SCRIPT)],
             capture_output=True,
@@ -171,6 +172,9 @@ class TestValidateGovernanceCli:
         )
 
         assert result.returncode == 0, result.stdout + result.stderr
-        assert result.stdout.count("PASS") == 10  # 3 catalog files + 7 policy files
+        # 3 catalog files + 7 policy files + 1 local-dev example + the
+        # deny-by-default check on the committed identity policy (Batch 5.1).
+        assert result.stdout.count("PASS") == 12
         assert "FAIL" not in result.stdout
-        assert "10/10 governance files valid." in result.stdout
+        assert "11/11 governance files valid." in result.stdout
+        assert "deny-by-default" in result.stdout

@@ -16,6 +16,7 @@ All wiring (settings, stores, orchestrator, reliability guards) happens in
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -26,7 +27,11 @@ from ci_agent.adapters.github_actions.client import GitHubAuthConfig, GitHubClie
 from ci_agent.audit.audit_store import AuditStore
 from ci_agent.config.settings import Settings, get_settings
 from ci_agent.db.base import Base, create_engine, get_session_factory
-from ci_agent.governance import load_intake_schema, load_policy_file, load_policy_spec
+from ci_agent.governance import (
+    load_identity_policy,
+    load_intake_schema,
+    load_policy_spec,
+)
 from ci_agent.ingress import github_webhook
 from ci_agent.ingress.replay_guard import ReplayGuard
 from ci_agent.observer.execution_observer import ExecutionObserver
@@ -44,11 +49,33 @@ from ci_agent.reliability.concurrency_guard import ConcurrencyGuard
 from ci_agent.reporting.evidence_assembler import EvidenceAssembler
 from ci_agent.reporting.report_api import router as report_api_router
 
+LOGGER = logging.getLogger("ci_agent.ingress")
 
-def _load_allowlists() -> tuple[list[str], list[str]]:
-    """Load repository/branch glob allowlists from the governed identity policy."""
-    policy = load_policy_file("identity_policy")
-    return policy.get("allowed_repositories", []), policy.get("allowed_branches", [])
+# Batch 5.1 (Item 2): the committed identity policy denies everything; ONLY
+# the `local` environment may swap in the clearly-marked local-dev override.
+LOCAL_DEV_ENV = "local"
+
+
+def _load_allowlists(settings: Settings) -> tuple[list[str], list[str]]:
+    """Load repository/branch allowlists per environment (fail-closed default).
+
+    ``local``: the examples/identity_policy.local-dev.yaml override, loudly
+    logged. Every other environment: the committed deny-everything default.
+    """
+    if settings.env == LOCAL_DEV_ENV:
+        policy = load_identity_policy(local_dev_override=True)
+        LOGGER.warning(
+            "⚠ Using LOCAL-DEV identity policy override "
+            "(examples/identity_policy.local-dev.yaml) — do not use in "
+            "shared/prod environments. Committed default remains "
+            "deny-everything."
+        )
+    else:
+        policy = load_identity_policy(local_dev_override=False)
+    return (
+        list(policy.get("allowed_repositories", [])),
+        list(policy.get("allowed_branches", [])),
+    )
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -60,7 +87,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     resolved_settings = settings or get_settings()
     webhook_secret = resolved_settings.resolved_webhook_secret()
     admin_api_key = resolved_settings.resolved_admin_api_key()
-    allowed_repositories, allowed_branches = _load_allowlists()
+    allowed_repositories, allowed_branches = _load_allowlists(resolved_settings)
 
     engine = create_engine(resolved_settings.database_url)
     session_factory = get_session_factory(engine)
@@ -72,7 +99,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # --- Batch 5: registry, planner, PDP, orchestrator, reliability ----------
     project_registry = ProjectRegistry(session_factory)
     intake_schema = load_intake_schema()
-    policy_spec = load_policy_spec()
+    policy_spec = load_policy_spec(local_dev_override=(resolved_settings.env == LOCAL_DEV_ENV))
     planner = Planner(TemplateRegistry(), policy_spec)
     opa_client = OPAClient(resolved_settings.opa_url, resolved_settings.opa_timeout_seconds)
     pdp = PolicyDecisionPoint(opa_client, audit_store, policy_spec, session_factory=session_factory)

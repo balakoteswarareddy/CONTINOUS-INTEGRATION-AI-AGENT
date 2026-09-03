@@ -1,0 +1,22 @@
+#####################################################################
+# ⚠️  LOCAL DEVELOPMENT OVERRIDE — NEVER USE IN SHARED/PROD ENVIRONMENTS ⚠️
+#
+# This file exists ONLY so the stack is functional out of the box when
+# CI_AGENT_ENV=local. The application loads it INSTEAD of the committed
+# (deny-everything) identity_policy.yaml in that mode, and logs a loud
+# startup warning while it is active.
+#
+# The example-org/* patterns below are documentation examples from the
+# architecture report — they are not a real security boundary. Deploying
+# with this file (or copying it over the committed default) would let any
+# example-org repository trigger pipelines. Real environments must write
+# their own scoped identity_policy.yaml (Section 7 trust boundaries).
+#####################################################################
+policy_version: "1.0.0"
+allowed_repositories:
+  - "example-org/*"
+allowed_branches:
+  - "main"
+  - "release/*"
+  - "feature/*"
+allowed_identities: []

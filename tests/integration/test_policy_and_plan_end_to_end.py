@@ -19,6 +19,7 @@ import pytest
 from ci_agent.audit.audit_store import AuditStore
 from ci_agent.core.models.common import PolicyDecision
 from ci_agent.db.base import Base, create_engine, get_session_factory
+from ci_agent.governance import load_policy_spec
 from ci_agent.planner.planner import Planner
 from ci_agent.planner.templates.template_registry import TemplateRegistry
 from ci_agent.policy.models import PolicyInputFacts
@@ -53,9 +54,18 @@ def audit_store_integration(tmp_path) -> AuditStore:
 
 @pytest.fixture()
 def live_pdp(audit_store_integration: AuditStore) -> PolicyDecisionPoint:
-    """PDP against LIVE OPA with the GOVERNED catalog policy (not a fixture spec)."""
+    """PDP against LIVE OPA with the GOVERNED catalog policy (not a fixture spec).
+
+    Uses the local-dev identity override explicitly (Batch 5.1): the committed
+    identity_policy.yaml is deny-everything, so these positive-path tests
+    could not pass against it. Other families are the governed defaults.
+    """
     client = OPAClient(base_url=OPA_URL)
-    yield PolicyDecisionPoint(opa_client=client, audit_store=audit_store_integration)
+    yield PolicyDecisionPoint(
+        opa_client=client,
+        audit_store=audit_store_integration,
+        policy_spec=load_policy_spec(local_dev_override=True),
+    )
     client.close()
 
 
