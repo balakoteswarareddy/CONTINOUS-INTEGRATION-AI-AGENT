@@ -37,6 +37,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from ci_agent.adapters.base import RunnerAdapter
+from ci_agent.adapters.router import AdapterRouter, select_runner_name
 from ci_agent.audit.audit_store import AuditStore
 from ci_agent.core.models.common import PolicyDecision, Severity
 from ci_agent.core.models.execution_plan import ExecutionPlan
@@ -134,7 +135,7 @@ class PhaseBOrchestrator:
         project_registry: ProjectRegistry,
         planner: Any,
         pdp: PolicyDecisionPoint,
-        adapter: RunnerAdapter,
+        adapter: RunnerAdapter | AdapterRouter,
         github_client: Any,
         concurrency_guard: ConcurrencyGuard,
         policy_spec_version: str,
@@ -261,11 +262,12 @@ class PhaseBOrchestrator:
         )
 
         wave_1 = self._wave_plan(plan, PHASE_B_WAVE_1_STAGES)
-        artifact = self._adapter.compile(
+        adapter = self._runner_adapter(profile)
+        artifact = adapter.compile(
             wave_1,
             metadata={"repository": run.repository, "source_sha": run.source_sha or ""},
         )
-        dispatch_ref = self._adapter.dispatch(artifact, run_id)
+        dispatch_ref = adapter.dispatch(artifact, run_id)
         with self._session_factory() as session:
             persisted = session.get(RunRecord, run_id)
             assert persisted is not None, f"run {run_id!r} vanished mid-dispatch"
@@ -441,11 +443,12 @@ class PhaseBOrchestrator:
             }
 
         wave_2 = self._wave_plan(plan, PHASE_B_WAVE_2_STAGES)
-        artifact = self._adapter.compile(
+        adapter = self._runner_adapter(profile)
+        artifact = adapter.compile(
             wave_2,
             metadata={"repository": run.repository, "source_sha": run.source_sha or ""},
         )
-        wave2_ref = self._adapter.dispatch(artifact, run_id)
+        wave2_ref = adapter.dispatch(artifact, run_id)
         # Batch 8 (folded-in Batch 7.1 Fix B): persist the wave-2 dispatch
         # coordinates on the RunRecord itself (same convention as the wave-1
         # columns) — queryable from the DB directly, not only from the audit
@@ -710,6 +713,18 @@ class PhaseBOrchestrator:
             )
             return False
         return True
+
+    def _runner_adapter(self, profile: Any) -> RunnerAdapter:
+        """Select the runner adapter for a project (Batch 8 multi-runner).
+
+        Same contract as PhaseAOrchestrator._runner_adapter: with an
+        AdapterRouter wired, an unknown/unregistered runner raises
+        UnknownRunnerError at plan time and the run parks in ERROR (fail
+        closed); a plain adapter (tests) passes through unchanged.
+        """
+        if isinstance(self._adapter, AdapterRouter):
+            return self._adapter.adapter_for_profile(select_runner_name(profile))
+        return self._adapter
 
     def _require_run(self, run_id: str) -> RunRecord:
         with self._session_factory() as session:

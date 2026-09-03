@@ -27,6 +27,22 @@ GITHUB_APP_ID_VARIABLE: str = "GITHUB_APP_ID"
 GITHUB_APP_PRIVATE_KEY_PATH_VARIABLE: str = "GITHUB_APP_PRIVATE_KEY_PATH"
 GITHUB_INSTALLATION_ID_VARIABLE: str = "GITHUB_INSTALLATION_ID"
 
+# --- Batch 8: multi-runner (GitLab CI + Jenkins adapters) -------------------
+GITLAB_ACCESS_TOKEN_VARIABLE: str = "GITLAB_ACCESS_TOKEN"
+GITLAB_WEBHOOK_TOKEN_VARIABLE: str = "GITLAB_WEBHOOK_TOKEN"
+JENKINS_URL_VARIABLE: str = "JENKINS_URL"
+JENKINS_USER_VARIABLE: str = "JENKINS_USER"
+JENKINS_API_TOKEN_VARIABLE: str = "JENKINS_API_TOKEN"
+DEFAULT_RUNNER_VARIABLE: str = "CI_AGENT_DEFAULT_RUNNER"
+DEFAULT_RUNNER: str = "github_actions"
+# Documented local-dev placeholders (never used in dev/prod — see the
+# resolved_* methods; NOTES.md documents the register-if-configured policy).
+LOCAL_DEV_GITLAB_TOKEN: str = "ci-agent-local-dev-gitlab-token"
+LOCAL_DEV_GITLAB_WEBHOOK_TOKEN: str = "ci-agent-local-dev-gitlab-webhook-token"
+LOCAL_DEV_JENKINS_URL: str = "http://localhost:8080"
+LOCAL_DEV_JENKINS_USER: str = "ci-agent-local-dev"
+LOCAL_DEV_JENKINS_TOKEN: str = "ci-agent-local-dev-jenkins-token"
+
 ADMIN_API_KEY_VARIABLE: str = "ADMIN_API_KEY"
 LOCAL_DEV_ADMIN_KEY: str = "ci-agent-local-admin-key"
 MAX_CONCURRENT_RUNS_VARIABLE: str = "MAX_CONCURRENT_RUNS_PER_PROJECT"
@@ -57,6 +73,13 @@ class Settings:
     github_app_id: str | None = None
     github_app_private_key_path: str | None = None
     github_installation_id: str | None = None
+    # --- Batch 8: multi-runner (raw env values; resolution is explicit) -----
+    gitlab_access_token: str | None = None
+    gitlab_webhook_token: str | None = None
+    jenkins_url: str | None = None
+    jenkins_user: str | None = None
+    jenkins_api_token: str | None = None
+    default_runner: str = DEFAULT_RUNNER
     admin_api_key: str | None = None
     max_concurrent_runs_per_project: int = DEFAULT_MAX_CONCURRENT_RUNS
     # Batch 7: real cosign verify wrapper — resolved from PATH unless the
@@ -77,6 +100,12 @@ class Settings:
             github_webhook_secret=_cleaned_env(GITHUB_WEBHOOK_SECRET_VARIABLE) or None,
             admin_api_key=_cleaned_env(ADMIN_API_KEY_VARIABLE) or None,
             cosign_binary=os.environ.get(COSIGN_BINARY_VARIABLE, DEFAULT_COSIGN_BINARY),
+            gitlab_access_token=_cleaned_env(GITLAB_ACCESS_TOKEN_VARIABLE) or None,
+            gitlab_webhook_token=_cleaned_env(GITLAB_WEBHOOK_TOKEN_VARIABLE) or None,
+            jenkins_url=_cleaned_env(JENKINS_URL_VARIABLE) or None,
+            jenkins_user=_cleaned_env(JENKINS_USER_VARIABLE) or None,
+            jenkins_api_token=_cleaned_env(JENKINS_API_TOKEN_VARIABLE) or None,
+            default_runner=_cleaned_env(DEFAULT_RUNNER_VARIABLE) or DEFAULT_RUNNER,
             max_concurrent_runs_per_project=_int_env(
                 MAX_CONCURRENT_RUNS_VARIABLE, DEFAULT_MAX_CONCURRENT_RUNS
             ),
@@ -112,6 +141,54 @@ class Settings:
         raise RuntimeError(
             f"{ADMIN_API_KEY_VARIABLE} must be set when {ENV_VARIABLE} is {self.env!r} "
             "(refusing to expose admin endpoints without a key)"
+        )
+
+    # --- Batch 8: multi-runner credential resolution --------------------------
+
+    def resolved_gitlab_access_token(self) -> str:
+        """GitLab project access token — no default outside ``local``.
+
+        Constructing a GitLab client without a token fails loudly (the
+        constructor raises); this resolver additionally documents the local
+        dev placeholder.
+        """
+        if self.gitlab_access_token:
+            return self.gitlab_access_token
+        if self.env == "local":
+            return LOCAL_DEV_GITLAB_TOKEN
+        raise RuntimeError(
+            f"{GITLAB_ACCESS_TOKEN_VARIABLE} must be set when {ENV_VARIABLE} is "
+            f"{self.env!r} (refusing to construct an unauthenticated GitLab client)"
+        )
+
+    def resolved_gitlab_webhook_token(self) -> str | None:
+        """Shared secret for POST /webhooks/gitlab (X-Gitlab-Token comparison).
+
+        ``local`` falls back to a documented dev default. In other
+        environments an unset token leaves the endpoint fail-closed: every
+        delivery is rejected with 401 and audited (NOTES.md) — startup is
+        NOT blocked, so GitHub-only deployments keep booting.
+        """
+        if self.gitlab_webhook_token:
+            return self.gitlab_webhook_token
+        if self.env == "local":
+            return LOCAL_DEV_GITLAB_WEBHOOK_TOKEN
+        return None
+
+    def jenkins_configured(self) -> bool:
+        """True when the full Jenkins credential triple is present."""
+        return bool(self.jenkins_url and self.jenkins_user and self.jenkins_api_token)
+
+    def resolved_jenkins_config(self) -> tuple[str, str, str]:
+        """(base_url, username, api_token) — no defaults outside ``local``."""
+        if self.jenkins_configured():
+            return (self.jenkins_url or "", self.jenkins_user or "", self.jenkins_api_token or "")
+        if self.env == "local":
+            return (LOCAL_DEV_JENKINS_URL, LOCAL_DEV_JENKINS_USER, LOCAL_DEV_JENKINS_TOKEN)
+        raise RuntimeError(
+            f"{JENKINS_URL_VARIABLE}, {JENKINS_USER_VARIABLE} and "
+            f"{JENKINS_API_TOKEN_VARIABLE} must be set when {ENV_VARIABLE} is "
+            f"{self.env!r} (refusing to construct a half-configured Jenkins client)"
         )
 
 

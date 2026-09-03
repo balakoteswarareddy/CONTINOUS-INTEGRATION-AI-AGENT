@@ -34,6 +34,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from ci_agent.adapters.base import RunnerAdapter
+from ci_agent.adapters.router import AdapterRouter, select_runner_name
 from ci_agent.audit.audit_store import AuditStore
 from ci_agent.core.models.common import PolicyDecision, RiskTier
 from ci_agent.core.models.execution_plan import ExecutionPlan
@@ -109,7 +110,7 @@ class PhaseAOrchestrator:
         project_registry: ProjectRegistry,
         planner: Any,
         pdp: PolicyDecisionPoint,
-        adapter: RunnerAdapter,
+        adapter: RunnerAdapter | AdapterRouter,
         github_client: Any,
         concurrency_guard: ConcurrencyGuard,
         policy_spec_version: str,
@@ -219,14 +220,15 @@ class PhaseAOrchestrator:
             return {"state": RunState.ERROR.value, "reason": "concurrency limit"}
 
         try:
-            artifact = self._adapter.compile(
+            adapter = self._runner_adapter(profile)
+            artifact = adapter.compile(
                 plan,
                 metadata={
                     "repository": run.repository,
                     "source_sha": run.source_sha or "",
                 },
             )
-            dispatch_ref = self._adapter.dispatch(artifact, run_id)
+            dispatch_ref = adapter.dispatch(artifact, run_id)
         except Exception:
             self._release_guard(run.project_id)  # no quota leak on failed dispatch
             raise
@@ -510,6 +512,20 @@ class PhaseAOrchestrator:
         )
 
     # ---------------------------------------------------------------- helpers
+
+    def _runner_adapter(self, profile: Any) -> RunnerAdapter:
+        """Select the runner adapter for a project (Batch 8 multi-runner).
+
+        ``self._adapter`` is either a plain :class:`RunnerAdapter` (tests,
+        single-runner wiring) or an :class:`AdapterRouter` (create_app
+        production wiring). With a router, an unknown/unregistered runner
+        raises :class:`UnknownRunnerError` HERE — at plan/dispatch time,
+        before any compile or dispatch — and the run parks in ERROR (fail
+        closed; never a silent fallback to a different runner).
+        """
+        if isinstance(self._adapter, AdapterRouter):
+            return self._adapter.adapter_for_profile(select_runner_name(profile))
+        return self._adapter
 
     def _plan_facts(
         self,

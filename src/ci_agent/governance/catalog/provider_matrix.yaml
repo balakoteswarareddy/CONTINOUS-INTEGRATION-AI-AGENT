@@ -2,9 +2,11 @@
 #
 # Supported providers today. Intentionally minimal — grows in later batches as
 # adapters are implemented (Report Section 5/8 provider abstraction).
+# Batch 8: gitlab_ci and jenkins join the runner providers (Stage 18
+# multi-runner scale); the AdapterRouter keys match these names exactly.
 version: "1.0.0"
 scm_providers: [github]
-runner_providers: [github_actions]
+runner_providers: [github_actions, gitlab_ci, jenkins]
 security_tool_providers: []
 artifact_registries: []
 secrets_providers: []

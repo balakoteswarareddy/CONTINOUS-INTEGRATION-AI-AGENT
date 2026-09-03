@@ -70,7 +70,9 @@ class TestLoadProviderMatrix:
 
         assert data["version"] == "1.0.0"
         assert data["scm_providers"] == ["github"]
-        assert data["runner_providers"] == ["github_actions"]
+        # Batch 8 (Stage 18): gitlab_ci + jenkins join the runner providers;
+        # the AdapterRouter keys match these names exactly.
+        assert data["runner_providers"] == ["github_actions", "gitlab_ci", "jenkins"]
         assert data["security_tool_providers"] == []
         assert data["artifact_registries"] == []
         assert data["secrets_providers"] == []
