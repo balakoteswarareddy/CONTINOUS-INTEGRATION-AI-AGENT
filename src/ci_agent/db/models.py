@@ -441,3 +441,39 @@ class ProvenanceRecordRow(Base):
             f"<ProvenanceRecordRow digest={self.artifact_digest!r} "
             f"predicate={self.predicate_type!r}>"
         )
+
+
+class AIInvocationRecord(Base):
+    """One model-gateway invocation (Batch 9; Report Sections 6 and 7.3).
+
+    EVERY invocation is logged here regardless of outcome (success, provider
+    failure, policy rejection, no-model fallback). The row carries HASHES,
+    never content: the prompt may contain source code which is potentially
+    confidential, so only ``prompt_hash``/``response_hash`` (sha256,
+    ``sha256:...`` format) are stored. ``run_id`` is nullable — some
+    invocations (intake normalization, design-time explanation) are not
+    run-scoped.
+    """
+
+    __tablename__ = "ai_invocation_records"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    run_id: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("run_records.run_id"), nullable=True, index=True
+    )
+    feature: Mapped[str] = mapped_column(String(64))
+    provider: Mapped[str] = mapped_column(String(64))
+    context_classification: Mapped[str] = mapped_column(String(32))
+    prompt_hash: Mapped[str] = mapped_column(String(80))
+    response_hash: Mapped[str] = mapped_column(String(80))
+    tokens_used: Mapped[int | None] = mapped_column(nullable=True)
+    latency_ms: Mapped[int] = mapped_column(default=0)
+    fallback_used: Mapped[bool] = mapped_column(default=False)
+    policy_allowed: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow)
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return (
+            f"<AIInvocationRecord feature={self.feature!r} provider={self.provider!r} "
+            f"policy_allowed={self.policy_allowed!r}>"
+        )

@@ -49,6 +49,16 @@ MAX_CONCURRENT_RUNS_VARIABLE: str = "MAX_CONCURRENT_RUNS_PER_PROJECT"
 DEFAULT_MAX_CONCURRENT_RUNS: int = 3
 
 COSIGN_BINARY_VARIABLE: str = "CI_AGENT_COSIGN_BINARY"
+
+# --- Batch 9: AI model gateway (Section 13 Phase 4) ------------------------
+# Default is the safe noop provider: no model is called without explicit
+# configuration (Section 12 "internal/no-model fallback"; Section 18
+# "platform remains functional when the AI service is unavailable").
+AI_PROVIDER_VARIABLE: str = "AI_PROVIDER"
+MODEL_TOKEN_BUDGET_VARIABLE: str = "MODEL_TOKEN_BUDGET"
+VALID_AI_PROVIDERS: tuple[str, ...] = ("noop", "openai", "anthropic")
+DEFAULT_AI_PROVIDER: str = "noop"
+DEFAULT_MODEL_TOKEN_BUDGET: int = 4096
 DEFAULT_COSIGN_BINARY: str = "cosign"
 
 OPA_URL_VARIABLE: str = "OPA_URL"
@@ -85,6 +95,9 @@ class Settings:
     # Batch 7: real cosign verify wrapper — resolved from PATH unless the
     # env var points at a specific binary (documented in .env.example).
     cosign_binary: str = DEFAULT_COSIGN_BINARY
+    # --- Batch 9: AI model gateway -------------------------------------------
+    ai_provider: str = DEFAULT_AI_PROVIDER
+    model_token_budget: int = DEFAULT_MODEL_TOKEN_BUDGET
 
     @staticmethod
     def from_environment() -> Settings:
@@ -109,7 +122,18 @@ class Settings:
             max_concurrent_runs_per_project=_int_env(
                 MAX_CONCURRENT_RUNS_VARIABLE, DEFAULT_MAX_CONCURRENT_RUNS
             ),
+            ai_provider=((_cleaned_env(AI_PROVIDER_VARIABLE) or DEFAULT_AI_PROVIDER).lower()),
+            model_token_budget=_int_env(MODEL_TOKEN_BUDGET_VARIABLE, DEFAULT_MODEL_TOKEN_BUDGET),
         )
+
+    def resolved_ai_provider(self) -> str:
+        """Validated AI provider name (unknown values fail loud)."""
+        if self.ai_provider not in VALID_AI_PROVIDERS:
+            raise ValueError(
+                f"{AI_PROVIDER_VARIABLE} must be one of {', '.join(VALID_AI_PROVIDERS)}; "
+                f"got {self.ai_provider!r}"
+            )
+        return self.ai_provider
 
     def resolved_webhook_secret(self) -> bytes:
         """Return the webhook HMAC secret as bytes.
