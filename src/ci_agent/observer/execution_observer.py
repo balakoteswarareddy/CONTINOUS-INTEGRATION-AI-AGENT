@@ -9,6 +9,7 @@ every write appends a ``stage_transition`` AuditStore event.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any
@@ -19,6 +20,36 @@ from sqlalchemy.orm import Session, sessionmaker
 from ci_agent.audit.audit_store import AuditStore
 from ci_agent.core.models.common import StageStatus
 from ci_agent.db.models import StageExecutionRecord, utcnow
+from ci_agent.telemetry.emitter import TelemetryEmitter
+from ci_agent.telemetry.pipeline_event import StageEvent
+
+LOGGER = logging.getLogger(__name__)
+
+# Batch 8, Task E: coarse task-type vocabulary for the OTel
+# cicd.pipeline.task.type field. The observer sees stage ids only, so the
+# category mapping is an explicit, reviewable table (never inferred from
+# free-form strings); unknown stage ids map to "other".
+STAGE_TASK_TYPES: dict[str, str] = {
+    "checkout": "checkout",
+    "format_lint": "lint",
+    "sast": "scan",
+    "unit_tests": "test",
+    "secret_scan": "scan",
+    "dependency_scan": "scan",
+    "policy_gate": "gate",
+    "human_approval": "gate",
+    "merge_decision": "gate",
+    "full_build": "build",
+    "integration_tests": "test",
+    "coverage_gate": "gate",
+    "container_build": "build",
+    "sbom_generate": "supply_chain",
+    "image_scan": "scan",
+    "sign_attest": "sign",
+    "publish": "publish",
+    "record_evidence": "evidence",
+    "workflow": "workflow",
+}
 
 # Explicit allowed-transition table (monotonic; Section 7.3 / Section 10).
 # Re-recording the SAME status is always allowed (idempotency). A first-time
@@ -97,9 +128,17 @@ class ExecutionObserver:
         {"sast", "secret_scan", "dependency_scan", "image_scan"}
     )
 
-    def __init__(self, session_factory: sessionmaker[Session], audit_store: AuditStore) -> None:
+    def __init__(
+        self,
+        session_factory: sessionmaker[Session],
+        audit_store: AuditStore,
+        telemetry_emitter: TelemetryEmitter | None = None,
+    ) -> None:
         self._session_factory = session_factory
         self._audit_store = audit_store
+        # Batch 8, Task E: optional normalized-telemetry emitter (singleton
+        # on app.state in production). None keeps standalone tests silent.
+        self._telemetry = telemetry_emitter
         # Callable(run_id, stage_id) -> None; set by create_app (Batch 6).
         self.scan_evidence_collector: Callable[..., object] | None = None
 
@@ -204,6 +243,31 @@ class ExecutionObserver:
             "stage_transition",
             self._event_payload(record, action=action, changed=changed),
         )
+        # Batch 8, Task E: emit one normalized StageEvent per recorded
+        # transition (including idempotent no-ops — the payload says so).
+        # Telemetry must never be a failure point for recording (Section 10):
+        # the emitter never raises and this wrapper absorbs construction
+        # errors too.
+        if self._telemetry is not None:
+            try:
+                self._telemetry.emit_stage(
+                    StageEvent(
+                        run_id=run_id,
+                        stage_id=stage_id,
+                        task_type=STAGE_TASK_TYPES.get(stage_id, "other"),
+                        status=StageStatus(status_value),
+                        duration_ms=record.duration_ms,
+                        exit_code=record.exit_code,
+                        attributes={"action": action, "changed": str(changed)},
+                    )
+                )
+            except Exception:
+                LOGGER.debug(
+                    "stage telemetry emission failed for run=%s stage=%s",
+                    run_id,
+                    stage_id,
+                    exc_info=True,
+                )
         return record
 
     def get_run_timeline(self, run_id: str) -> list[StageExecutionRecord]:

@@ -36,7 +36,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from ci_agent.adapters.base import RunnerAdapter
 from ci_agent.adapters.router import AdapterRouter, select_runner_name
 from ci_agent.audit.audit_store import AuditStore
-from ci_agent.core.models.common import PolicyDecision, RiskTier
+from ci_agent.core.models.common import PolicyDecision, RiskTier, StageStatus
 from ci_agent.core.models.execution_plan import ExecutionPlan
 from ci_agent.core.models.pipeline_spec import PipelineSpec
 from ci_agent.db.models import ApprovalRecord, RunRecord, StageExecutionRecord, utcnow
@@ -49,6 +49,8 @@ from ci_agent.policy.models import PolicyInputFacts
 from ci_agent.policy.policy_decision_point import PolicyDecisionPoint
 from ci_agent.projects.project_registry import ProjectRegistry
 from ci_agent.reliability.concurrency_guard import ConcurrencyGuard
+from ci_agent.telemetry.emitter import TelemetryEmitter
+from ci_agent.telemetry.pipeline_event import PipelineRunEvent
 
 # Check Run name carrying the published merge decision (Section 5.1 stage 10).
 MERGE_DECISION_CHECK_NAME = "ci-agent merge decision"
@@ -115,6 +117,7 @@ class PhaseAOrchestrator:
         concurrency_guard: ConcurrencyGuard,
         policy_spec_version: str,
         require_human_approval_for: frozenset[RiskTier] = DEFAULT_REQUIRE_HUMAN_APPROVAL_FOR,
+        telemetry_emitter: TelemetryEmitter | None = None,
     ) -> None:
         self._audit_store = audit_store
         self._session_factory = session_factory
@@ -129,6 +132,9 @@ class PhaseAOrchestrator:
         # PolicySpec.approval_policy.require_human_approval_for — never
         # hardcoded at the call site.
         self._require_human_approval_for = require_human_approval_for
+        # Batch 8, Task E: optional normalized-telemetry emitter (singleton on
+        # app.state in production; None keeps standalone tests silent).
+        self._telemetry = telemetry_emitter
         # Batch 7: optional Phase B start callback (wired in create_app).
         # The orchestrators stay decoupled — Phase A knows only the callable
         # contract. A Phase B start failure is AUDITED (and can be re-driven
@@ -527,6 +533,34 @@ class PhaseAOrchestrator:
             return self._adapter.adapter_for_profile(select_runner_name(profile))
         return self._adapter
 
+    def _emit_run_event(self, run_id: str, status: StageStatus, event_type: str) -> None:
+        """Emit one normalized pipeline-run telemetry event (Batch 8, Task E).
+
+        Telemetry must never be a failure point for orchestration (Section
+        10): the emitter itself never raises, and this wrapper additionally
+        absorbs model-construction/profile-lookup errors.
+        """
+        if self._telemetry is None:
+            return
+        try:
+            run = self._require_run(run_id)
+            try:
+                runner = self._registry.get_profile(run.project_id).runner
+            except Exception:
+                runner = "unknown"
+            self._telemetry.emit_pipeline_run(
+                PipelineRunEvent(
+                    event_type=event_type,
+                    pipeline_name=run.project_id,
+                    run_id=run_id,
+                    runner=runner,
+                    status=status,
+                    attributes={"phase": "phase_a"},
+                )
+            )
+        except Exception:
+            LOGGER.debug("run telemetry emission failed for %s", run_id, exc_info=True)
+
     def _plan_facts(
         self,
         run: RunRecord,
@@ -661,6 +695,17 @@ class PhaseAOrchestrator:
         if reason:
             payload["reason"] = reason
         self._audit(run_id, "run_state_transition", payload)
+        # Batch 8, Task E: normalized telemetry at run start and terminal
+        # state. TRIGGER_VALIDATED from None is the run's first transition
+        # (start); the three Phase A terminal states close the lifecycle.
+        # StageStatus has no "error" member — ERROR maps to FAILED (documented
+        # in the emitter contract; the state itself is in the audit trail).
+        if current is None and target is RunState.TRIGGER_VALIDATED:
+            self._emit_run_event(run_id, StageStatus.RUNNING, "run_started")
+        elif target is RunState.MERGE_DECISION_PUBLISHED:
+            self._emit_run_event(run_id, StageStatus.PASSED, "run_terminal")
+        elif target in (RunState.FAILED, RunState.ERROR):
+            self._emit_run_event(run_id, StageStatus.FAILED, "run_terminal")
 
     def _write_state(self, run_id: str, current: RunState | None, target: RunState) -> None:
         with self._session_factory() as session:

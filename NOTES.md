@@ -446,6 +446,18 @@ respx-mocked client tests and adapter unit tests.
     not yet route every call through them (retries are active on both
     external clients); completing breaker wrapping of every GitHubClient
     method is a small hardening follow-up.
+15. reconciliation.py is typed to GitHubActionsAdapter
+    (adapter.download_results_artifact call at line ~85); a Jenkins or
+    GitLab adapter passed to reconcile_run() would AttributeError at that
+    line before any stage loops. Multi-runner reconciliation requires this
+    to be made adapter-agnostic (e.g., duck-typed or gated on adapter
+    capability). Batch 8 scope: documented only.
+16. Jenkins adapter run-level truth (workflow pseudo-stage status) is
+    recorded and audited but does not advance the PhaseAOrchestrator state
+    machine (stage_id == 'workflow' is explicitly ignored at
+    phase_a_orchestrator.py:172). Per-stage Jenkins status via the wfapi or
+    pipeline-graph plugin API is post-MVP. Until then, Jenkins runs require
+    manual reconciliation or a dedicated Jenkins-aware observer extension.
 
 ---
 
@@ -802,3 +814,211 @@ Section 6/18 exception/waiver workflow.
 still MVP-grade X-Admin-Key (Batch 5 caveat unchanged); `artifact_registry_
 client.push` exists for control-plane-driven environments but the compiled
 publish job is the normal push path.
+
+## Batch 8 — Additional Runner Adapters + Conformance + Normalized Telemetry
+
+Stage 18 (GitLab CI + Jenkins adapters + conformance suite), Stage 19
+(normalized observability), plus the folded-in Batch 7.1 wave-2 hardening
+items (Fix A spec-drift guard, Fix B wave-2 dispatch coordinates).
+
+### Fix A — spec-drift guard (Phase B)
+
+Phase B re-verifies the plan's provenance at BOTH dispatch waves, not just
+wave 1. The guard lives in `PhaseBOrchestrator._on_start` (wave 1) and
+`_evaluate_publish_gate` (wave 2): before each dispatch the orchestrator
+re-fetches the `RunRecord` (no in-memory staleness), re-canonicalizes the
+registry spec with `_canonical_spec_hash()`, and compares against the
+persisted `pipeline_spec_ref`:
+
+- **Mismatch** → run goes to `ERROR` (wave 1) / `FAILED` (wave 2, via the
+  publish-gate fail-closed path), an audit event `spec_drift_detected`
+  (`{point, expected_hash, actual_hash}`) is emitted, **no dispatch
+  happens**, and the persisted column is never overwritten.
+- **Persisted `pipeline_spec_ref` is None** (legacy rows created before the
+  column was populated, or the `_approve_phase_a` unit-test path) → the
+  hash is **backfilled** and audited (`pipeline_spec_ref_backfilled`), then
+  dispatch proceeds.
+- Phase A's `_on_run_created` is the FIRST write of the column, so there is
+  nothing to compare — backfill semantics, documented in-code.
+
+Covered by `tests/unit/test_orchestrator/test_spec_drift_guard.py` (7
+tests: drift at each wave, no-drift, legacy backfill, Fix B DB persistence
+via a wave-tracking adapter double, and an ORM column check).
+
+### Fix B — wave-2 dispatch coordinates (migration 0006)
+
+`RunRecord` gained `phase_b_wave2_branch` (String 255) and
+`phase_b_wave2_external_run_id` (String 64), following the wave-1 naming
+and table convention. `PhaseBOrchestrator` now persists the previously
+discarded wave-2 `DispatchRef` at publish-wave dispatch. Migration
+`0006_wave2_dispatch_coordinates.py` covers both columns; up/down/up
+verified (in `tests/unit/test_db/test_migrations.py`). The wave-2 branch is
+part of the observer's branch-prefix correlation set, so publish-job events
+correlate to the run.
+
+### GitLab CI adapter (Task A)
+
+`src/ci_agent/adapters/gitlab_ci/{__init__,compiler,client,adapter}.py`.
+
+- **Compiler**: `compile_to_gitlab_ci(plan)` → `.gitlab-ci.yml`. Stages list
+  + per-job `stage:` follow the plan's dependency order; commands come
+  ONLY from the existing `command_template_registry`; `internal.*` gate
+  steps compile to `exit 0` markers (no tool commands — conformance-checked);
+  every stage job uploads `<stage>.result.json` as an `artifacts.when:
+  always` path; a final `ci-agent-results` job (`when: always`, `needs`
+  all stage jobs) merges the per-stage result files into the run artifact.
+  YAML round-trips (`yaml.safe_load` in tests + conformance).
+- **Client**: `GitLabClient` over httpx with explicit timeouts;
+  `GITLAB_ACCESS_TOKEN` required (fail-loud `GitLabAPIError` when absent
+  outside local); `trigger_pipeline`, `get_pipeline`,
+  `get_pipeline_jobs`, `get_job_log` (trace → str),
+  `post_commit_status`; tokens are sent as headers only and never logged.
+- **Adapter** (`kind="gitlab_ci_pipeline"`): dispatch creates the
+  `ci-agent/<run_id>` branch from the source sha, commits the file, and
+  triggers the pipeline; the pipeline id is resolved from the trigger
+  response with a bounded list-by-ref retry (max 5, linear backoff) when
+  the response carries no id — `external_run_id=None` is recorded, not
+  fatal. `poll_status` uses an EXPLICIT status table (`created/pending →
+  PENDING, running → RUNNING, success → PASSED, failed → FAILED, canceled
+  → CANCELLED, skipped → SKIPPED`) and any UNKNOWN value fails closed to
+  FAILED (never guessed). `fetch_step_logs` → job trace by stage name.
+
+**GitLab webhook token mechanism + why** (`POST /webhooks/gitlab` only, as
+specified): GitLab signs webhook deliveries with a shared secret sent in
+the `X-Gitlab-Token` header — unlike GitHub there is no per-delivery HMAC
+signature, so the constant-time comparison of that shared secret IS the
+authentication boundary. The endpoint validates it with
+`secrets.compare_digest` and answers 401 to everything while the token is
+unset (fail closed — an unconfigured deployment must never accept
+deliveries). This reuses the Batch 2 replay guard (keyed by
+`X-Gitlab-Event-UUID`, with a synthetic uuid fallback when absent so
+deliveries still get a stable guard key) and the audit trail (receipt +
+processing audited per delivery; unmatched branches audited under
+`observer:unmatched`). Only `pipeline` and `job` (build) events are
+accepted (400 otherwise); the project `path_with_namespace` must match the
+identity-policy allow-list (403 otherwise, audited).
+
+### Jenkins adapter (Task B) — polling-only
+
+`src/ci_agent/adapters/jenkins/{__init__,compiler,client,adapter}.py`.
+
+- **Compiler**: `compile_to_jenkinsfile(plan)` → a declarative Jenkinsfile;
+  one stage per `ResolvedStep` in dependency order; registry commands only;
+  `internal.*` → `sh 'exit 0'`; single quotes in commands are escaped for
+  Groovy `sh '...'` strings. There is **NO results-artifact stage**: the
+  build result is authoritative from the Jenkins API itself (build result +
+  console log), so emitting result JSON files would be redundant plumbing —
+  this is the documented divergence from the GitLab/GitHub compilers.
+- **Client**: `JenkinsClient` with `JENKINS_URL` / `JENKINS_USER` /
+  `JENKINS_API_TOKEN` (all three required, fail-loud); basic auth over
+  httpx with explicit timeouts; `create_job` (config XML; falls back to
+  config update when the job exists), `build_job` (queue id from the
+  Location header), `get_queue_item`, `get_build`, `get_build_log`;
+  `JenkinsAPIError` carries the HTTP status (None on transport errors).
+- **Adapter** (`kind="jenkins_declarative_pipeline"`): dispatch creates or
+  updates the job `ci-agent-<run_id>` (Jenkinsfile embedded as config XML),
+  triggers a build, and resolves the build number by polling the queue item
+  (bounded: max 5 attempts, linear backoff; unresolved →
+  `external_run_id=None` recorded, not fatal). `poll_status` maps the
+  explicit result table (`SUCCESS → PASSED, FAILURE/UNSTABLE → FAILED,
+  ABORTED → CANCELLED, NOT_BUILT → SKIPPED`) plus `null`+building →
+  RUNNING, `null`+not-building → FAILED (fail closed); unknown results also
+  fail closed. Stage-level views are intentionally empty for the MVP —
+  Jenkins gives run-level truth here and per-stage mapping from a single
+  pipeline log is post-MVP (documented divergence). `fetch_step_logs` →
+  full console text.
+
+**Why no Jenkins webhook:** the batch spec fixes Jenkins as polling-only
+for the MVP. Completion is observed exclusively through the existing
+`reconciliation.py` loop calling `poll_status` (get_build). A Jenkins
+webhook would require a per-controller shared secret or GitHub-style
+signing that Jenkins does not natively provide (its CSRF crumbs and
+token-based identification are user-auth, not delivery-auth), so the
+control plane polls instead — simpler trust boundary, already exercised by
+the integration test's poll loop.
+
+### Adapter router (Task C)
+
+`src/ci_agent/adapters/router.py`: `AdapterRouter.get_adapter(runner)`
+raises `UnknownRunnerError` for anything not registered — never a silent
+default; failure surfaces at plan/dispatch time. Both orchestrators take
+the router (replacing the direct `GitHubActionsAdapter` dependency).
+`governance/catalog/provider_matrix.yaml` `runner_providers` now lists
+`github_actions`, `gitlab_ci`, `jenkins` (test updated).
+
+**Documented deviation (router ↔ profile vocabulary):** `ProjectProfile.
+runner` carries the runner OS string (`linux`/`windows`/`macos`) from the
+intake flow — it is NOT today a provider selection. `adapter_for_profile`
+therefore selects the deployment default provider (`default_runner`,
+github_actions unless configured) unless the profile string happens to be a
+registered provider name (`gitlab_ci`, `jenkins`), which is how the tests
+pin a provider. Making the intake capture an explicit provider choice is a
+future-batch schema change; the router API already accepts it.
+
+**Documented deviation (conditional registration):** `create_app` registers
+the GitLab and Jenkins adapters ONLY when their credentials resolve (env
+vars, or the documented local-dev placeholders). Without credentials the
+app still boots with GitHub-only routing and logs which providers are
+absent; a plan that then requests `gitlab_ci`/`jenkins` fails loudly with
+`UnknownRunnerError` at plan time rather than crashing startup. In dev/prod
+the clients themselves fail loud if constructed with empty credentials.
+
+### Conformance suite (Task D)
+
+`tests/unit/test_adapters/test_conformance.py` — parametrized over EVERY
+adapter (github_actions, gitlab_ci, jenkins) with fully mocked clients and
+ZERO live credentials. Checks per adapter: compile → `CompiledArtifact`
+(kind non-empty, content non-empty + parses for the YAML formats,
+sha256 `content_hash` correct, a planted fake secret in metadata never
+appears in content, `internal.*` stages carry no real tool commands);
+dispatch → `DispatchRef` (run_id match, `ci-agent/<run_id>` branch,
+external_run_id str|None); poll_status → `RunnerStatusSnapshot` (run_id
+match, statuses in our vocabulary, completed bool); fetch_step_logs → str;
+and a structural check that the `RunnerAdapter` base signatures +
+abstract-method set are unchanged after importing/using each adapter.
+Adding a new adapter in a future batch = ONE entry in
+`ADAPTER_FACTORIES` (documented at the top of the file). Live-credential
+dispatch checks live separately in `tests/integration/
+test_gitlab_dispatch.py` / `test_jenkins_dispatch.py` (skip-if-no-creds).
+
+### Normalized telemetry (Task E)
+
+`src/ci_agent/telemetry/{__init__,conventions,pipeline_event,emitter}.py`:
+exact OpenTelemetry semantic-convention STRING constants (no
+opentelemetry-sdk dependency — plain constants, as constrained); frozen
+Pydantic event models (`PipelineRunEvent`/`StageEvent`/`WorkerEvent`,
+`extra="forbid"`); `TelemetryEmitter` emitting via stdlib `logging` at INFO
+with a JSON formatter that stamps `otel.*`-named keys. The emitter NEVER
+raises — every emit is try/except-wrapped and failures degrade to a single
+reduced error-indicator log line (Report Section 10 degradation rule).
+Wiring: `ExecutionObserver.record_stage_transition` → `emit_stage`;
+`PhaseAOrchestrator` run start + terminal state → `emit_pipeline_run`;
+single emitter instance shared through `app.state.telemetry_emitter` and
+into both orchestrators and the observer. Phase B emits stage events
+through the shared observer path; its terminal `EVIDENCE_RECORDED` state
+has no dedicated pipeline-level event for the MVP (Phase A's terminal
+merge-decision event is the pipeline-level boundary) — documented here as
+the batch-scoped decision.
+
+### Environment additions
+
+`.env.example` documents the new variables with local-dev placeholders:
+`GITLAB_ACCESS_TOKEN`, `GITLAB_BASE_URL`, `GITLAB_WEBHOOK_TOKEN`,
+`JENKINS_URL`, `JENKINS_USER`, `JENKINS_API_TOKEN`. Resolution semantics in
+`config/settings.py` follow the established `resolved_*` pattern
+(fail-loud outside local; webhook token unset outside local ⇒ the endpoint
+401s everything by construction).
+
+### Batch 8 gate results
+
+- Full suite: **702 passed, 27 skipped** (live-credential integration
+  dispatches, live OPA, and env-dependent skips — 0 failed / 0 errors), via
+  BOTH `pytest` and `python -m pytest`.
+- ruff / black / mypy clean; governance validation 11/11 + deny-by-default.
+- Alembic 0006 up/down/up verified in `tests/unit/test_db/test_migrations.py`.
+- Conformance suite: 30/30 across all three adapters, zero credentials.
+
+**Flagged for later batches:** making `ProjectProfile.runner` an explicit
+provider selection (router already accepts it); stage-level Jenkins status
+views; Phase B terminal pipeline event; keyless signing (Batch 7 flag,
+unchanged).

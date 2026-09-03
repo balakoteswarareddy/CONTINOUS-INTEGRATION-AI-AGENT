@@ -1,9 +1,11 @@
 """FastAPI application for the CI Agent control plane (Batches 2-5).
 
-One app, five concern families mounted as routers:
+One app, six concern families mounted as routers:
 
 * ``/webhooks/github`` — ingress/trigger gateway + Execution Observer events
   (Batch 2 + Batch 4);
+* ``/webhooks/gitlab`` — Execution Observer events for GitLab pipelines/jobs
+  (Batch 8; token-authenticated, replay-guarded, run creation stays GitHub-side);
 * ``/admin/*`` — project onboarding + pipeline spec registration (Batch 5);
 * ``/runs/{id}/approve|reject`` — human approval API (Batch 5);
 * ``/runs/{id}``, ``/runs/{id}/report`` — reporting views (Batch 5);
@@ -26,6 +28,11 @@ from ci_agent.adapters.base import DispatchRef
 from ci_agent.adapters.github_actions.adapter import GitHubActionsAdapter
 from ci_agent.adapters.github_actions.client import GitHubAuthConfig, GitHubClient
 from ci_agent.adapters.github_actions.compiler import REPORT_UPLOAD_STAGES
+from ci_agent.adapters.gitlab_ci.adapter import GitLabCIAdapter
+from ci_agent.adapters.gitlab_ci.client import GitLabClient
+from ci_agent.adapters.jenkins.adapter import JenkinsAdapter
+from ci_agent.adapters.jenkins.client import JenkinsClient
+from ci_agent.adapters.router import AdapterRouter
 from ci_agent.audit.audit_store import AuditStore
 from ci_agent.config.settings import Settings, get_settings
 from ci_agent.db.base import Base, create_engine, get_session_factory
@@ -37,10 +44,11 @@ from ci_agent.governance import (
     load_intake_schema,
     load_policy_spec,
 )
-from ci_agent.ingress import github_webhook
+from ci_agent.ingress import github_webhook, gitlab_webhook
 from ci_agent.ingress.replay_guard import ReplayGuard
 from ci_agent.observer.execution_observer import ExecutionObserver
 from ci_agent.observer.github_events import ObserverEventHandlers
+from ci_agent.observer.gitlab_events import GitLabEventHandlers
 from ci_agent.orchestrator.approval_api import router as approval_api_router
 from ci_agent.orchestrator.phase_a_orchestrator import PhaseAOrchestrator
 from ci_agent.orchestrator.phase_b_orchestrator import PhaseBOrchestrator
@@ -57,6 +65,7 @@ from ci_agent.reporting.report_api import router as report_api_router
 from ci_agent.security.security_evidence_service import SecurityEvidenceService
 from ci_agent.supplychain.sbom_service import SBOMService
 from ci_agent.supplychain.signing_service import SigningService, VerifyRunner
+from ci_agent.telemetry.emitter import TelemetryEmitter
 
 LOGGER = logging.getLogger("ci_agent.ingress")
 
@@ -102,8 +111,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     session_factory = get_session_factory(engine)
     audit_store = AuditStore(session_factory)
     replay_guard = ReplayGuard(audit_store)
-    observer = ExecutionObserver(session_factory, audit_store)
+    # Batch 8, Task E: the singleton telemetry emitter (never raises; its
+    # logger can be re-configured by deployment tooling without code change).
+    telemetry_emitter = TelemetryEmitter()
+    observer = ExecutionObserver(session_factory, audit_store, telemetry_emitter=telemetry_emitter)
     observer_events = ObserverEventHandlers(observer, audit_store, session_factory)
+    # Batch 8, Task A: GitLab pipeline/job handlers (same wiring pattern).
+    gitlab_observer_events = GitLabEventHandlers(observer, audit_store, session_factory)
 
     # --- Batch 5: registry, planner, PDP, orchestrator, reliability ----------
     project_registry = ProjectRegistry(session_factory)
@@ -119,7 +133,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         installation_id=resolved_settings.github_installation_id,
     )
     github_client = GitHubClient(github_auth)
-    adapter = GitHubActionsAdapter(github_client)
+    # --- Batch 8, Task C: the AdapterRouter (multi-runner wiring) ------------
+    # GitHub registers unconditionally (existing behaviour: credentials fail
+    # at request time, not construction). GitLab/Jenkins register when their
+    # credentials are configured — and ALWAYS in local (documented dev
+    # placeholders). In dev/prod WITHOUT credentials the adapter is simply
+    # absent: a project routed to it fails LOUDLY at plan time with
+    # UnknownRunnerError (fail closed; never a silent fallback). Documented
+    # deviation from a literal "startup fails without the token" reading —
+    # see NOTES.md.
+    adapter_router = AdapterRouter(default_runner=resolved_settings.default_runner)
+    adapter_router.register("github_actions", GitHubActionsAdapter(github_client))
+    if resolved_settings.gitlab_access_token or resolved_settings.env == LOCAL_DEV_ENV:
+        gitlab_client = GitLabClient(resolved_settings.resolved_gitlab_access_token())
+        adapter_router.register("gitlab_ci", GitLabCIAdapter(gitlab_client))
+    else:
+        LOGGER.info("gitlab_ci adapter not registered (GITLAB_ACCESS_TOKEN unset)")
+    if resolved_settings.jenkins_configured() or resolved_settings.env == LOCAL_DEV_ENV:
+        jenkins_url, jenkins_user, jenkins_token = resolved_settings.resolved_jenkins_config()
+        adapter_router.register(
+            "jenkins", JenkinsAdapter(JenkinsClient(jenkins_url, jenkins_user, jenkins_token))
+        )
+    else:
+        LOGGER.info("jenkins adapter not registered (JENKINS_* variables unset)")
+    adapter = adapter_router  # the orchestrators accept router or adapter
     concurrency_guard = ConcurrencyGuard(resolved_settings.max_concurrent_runs_per_project)
     orchestrator = PhaseAOrchestrator(
         audit_store=audit_store,
@@ -134,8 +171,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         require_human_approval_for=frozenset(
             policy_spec.approval_policy.require_human_approval_for
         ),
+        telemetry_emitter=telemetry_emitter,
     )
     observer_events.on_stage_transition = orchestrator.on_stage_transition
+    gitlab_observer_events.on_stage_transition = orchestrator.on_stage_transition
     evidence_assembler = EvidenceAssembler(session_factory, audit_store)
 
     # --- Batch 6: real security findings pipeline ----------------------------
@@ -237,6 +276,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         signing_service=signing_service,
         exception_service=exception_service,
         evidence_downloader=_download_phase_b_evidence,
+        telemetry_emitter=telemetry_emitter,
     )
     # Section 5.2: an APPROVED Phase A merge decision is the ONLY Phase B
     # trigger — the enforcement lives in PhaseBOrchestrator.start itself.
@@ -269,6 +309,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.state.replay_guard = replay_guard
     application.state.observer = observer
     application.state.observer_events = observer_events
+    application.state.gitlab_observer_events = gitlab_observer_events
+    # Batch 8: shared-secret for POST /webhooks/gitlab (None in non-local
+    # environments without GITLAB_WEBHOOK_TOKEN -> endpoint fail-closed 401).
+    application.state.gitlab_webhook_token = resolved_settings.resolved_gitlab_webhook_token()
+    application.state.telemetry_emitter = telemetry_emitter
+    application.state.adapter_router = adapter_router
     application.state.allowed_repositories = allowed_repositories
     application.state.allowed_branches = allowed_branches
     application.state.session_factory = session_factory
@@ -287,6 +333,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.state.concurrency_guard = concurrency_guard
 
     application.include_router(github_webhook.router)
+    application.include_router(gitlab_webhook.router)
     application.include_router(admin_api_router)
     application.include_router(approval_api_router)
     application.include_router(report_api_router)

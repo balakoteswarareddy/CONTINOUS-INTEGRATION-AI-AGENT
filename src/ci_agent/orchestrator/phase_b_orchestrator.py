@@ -30,6 +30,7 @@ data is missing but a threshold is configured.
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Callable
 from typing import Any
 
@@ -39,7 +40,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from ci_agent.adapters.base import RunnerAdapter
 from ci_agent.adapters.router import AdapterRouter, select_runner_name
 from ci_agent.audit.audit_store import AuditStore
-from ci_agent.core.models.common import PolicyDecision, Severity
+from ci_agent.core.models.common import PolicyDecision, Severity, StageStatus
 from ci_agent.core.models.execution_plan import ExecutionPlan
 from ci_agent.core.models.pipeline_spec import PipelineSpec
 from ci_agent.db.models import RunRecord, StageExecutionRecord, utcnow
@@ -61,6 +62,8 @@ from ci_agent.reliability.concurrency_guard import ConcurrencyGuard
 from ci_agent.security.security_evidence_service import SecurityEvidenceService
 from ci_agent.supplychain.sbom_service import SBOMService, TagOnlyDigestError
 from ci_agent.supplychain.signing_service import SigningService
+from ci_agent.telemetry.emitter import TelemetryEmitter
+from ci_agent.telemetry.pipeline_event import PipelineRunEvent
 
 # Section 5.2 Stage -> run state (success path).
 PHASE_B_STAGE_TO_RUN_STATE: dict[str, RunState] = {
@@ -119,6 +122,8 @@ COVERAGE_THRESHOLD_KEY = "coverage_percent"
 MERGE_DECISION_AUDIT_EVENT = "merge_decision_published"
 PUBLISH_CHECK_NAME = "ci-agent publish decision"
 
+LOGGER = logging.getLogger("ci_agent.orchestrator.phase_b")
+
 _DEAD_STATES: frozenset[RunState] = frozenset(
     {RunState.FAILED, RunState.ERROR, PHASE_B_SUCCESS_STATE}
 )
@@ -146,6 +151,7 @@ class PhaseBOrchestrator:
         # the adapter's scan-artifact download using the Phase B dispatch
         # coordinates. Tests inject a deterministic fake.
         evidence_downloader: Callable[[str, str], dict[str, str]] | None = None,
+        telemetry_emitter: TelemetryEmitter | None = None,
     ) -> None:
         self._audit_store = audit_store
         self._session_factory = session_factory
@@ -160,6 +166,9 @@ class PhaseBOrchestrator:
         self._signing_service = signing_service
         self._exception_service = exception_service
         self._evidence_downloader = evidence_downloader
+        # Batch 8, Task E: optional normalized-telemetry emitter (singleton on
+        # app.state in production; None keeps standalone tests silent).
+        self._telemetry = telemetry_emitter
         # Runtime mirrors of audited facts (per run): recorded SBOM format and
         # the real verification outcome for the recorded signature.
         self._sbom_format_by_run: dict[str, str] = {}
@@ -726,6 +735,35 @@ class PhaseBOrchestrator:
             return self._adapter.adapter_for_profile(select_runner_name(profile))
         return self._adapter
 
+    def _emit_run_event(self, run_id: str, status: StageStatus, event_type: str) -> None:
+        """Emit one normalized pipeline-run telemetry event (Batch 8, Task E).
+
+        Phase B mirrors Phase A's emitter wiring so a run's terminal state is
+        emitted whichever phase ends it (documented in NOTES.md). Telemetry is
+        never a failure point: the emitter never raises and this wrapper
+        additionally absorbs model-construction/profile-lookup errors.
+        """
+        if self._telemetry is None:
+            return
+        try:
+            run = self._require_run(run_id)
+            try:
+                runner = self._registry.get_profile(run.project_id).runner
+            except Exception:
+                runner = "unknown"
+            self._telemetry.emit_pipeline_run(
+                PipelineRunEvent(
+                    event_type=event_type,
+                    pipeline_name=run.project_id,
+                    run_id=run_id,
+                    runner=runner,
+                    status=status,
+                    attributes={"phase": "phase_b"},
+                )
+            )
+        except Exception:
+            LOGGER.debug("run telemetry emission failed for %s", run_id, exc_info=True)
+
     def _require_run(self, run_id: str) -> RunRecord:
         with self._session_factory() as session:
             run = session.get(RunRecord, run_id)
@@ -755,6 +793,14 @@ class PhaseBOrchestrator:
         if reason:
             payload["reason"] = reason
         self._audit(run_id, "run_state_transition", payload)
+        # Batch 8, Task E: emit the run's terminal state from Phase B too
+        # (EVIDENCE_RECORDED is the success terminal for runs that complete
+        # the supply chain flow; StageStatus has no "error" member, so ERROR
+        # maps to FAILED — the authoritative state stays in the audit trail).
+        if target is PHASE_B_SUCCESS_STATE:
+            self._emit_run_event(run_id, StageStatus.PASSED, "run_terminal")
+        elif target in (RunState.FAILED, RunState.ERROR):
+            self._emit_run_event(run_id, StageStatus.FAILED, "run_terminal")
 
     def _write_state(self, run_id: str, current: RunState | None, target: RunState) -> None:
         with self._session_factory() as session:
