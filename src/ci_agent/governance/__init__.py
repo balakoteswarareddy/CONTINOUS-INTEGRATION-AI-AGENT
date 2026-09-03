@@ -14,6 +14,7 @@ from ci_agent.governance.loader import (
     load_intake_schema,
     load_org_policy_version,
     load_policy_file,
+    load_policy_spec,
     load_provider_matrix,
     validate_against_schema,
 )
@@ -32,6 +33,7 @@ __all__ = [
     "load_intake_schema",
     "load_org_policy_version",
     "load_policy_file",
+    "load_policy_spec",
     "load_provider_matrix",
     "validate_against_schema",
 ]

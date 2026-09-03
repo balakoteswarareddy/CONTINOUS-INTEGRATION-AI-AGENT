@@ -11,10 +11,22 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import jsonschema
 import yaml
+from pydantic import BaseModel
+
+from ci_agent.core.models.policy_spec import (
+    AIPolicy,
+    ApprovalPolicy,
+    ArtifactPolicy,
+    BuildPolicy,
+    IdentityPolicy,
+    PolicySpec,
+    SecurityPolicy,
+    ToolPolicy,
+)
 
 SCHEMAS_DIR: Path = Path(__file__).resolve().parent / "schemas"
 CATALOG_DIR: Path = Path(__file__).resolve().parent / "catalog"
@@ -156,6 +168,37 @@ def load_org_policy_version() -> str:
         )
         raise GovernanceError(f"Policy family files disagree on policy_version: {detail}")
     return versions.pop()
+
+
+def load_policy_spec() -> PolicySpec:
+    """Compile the 7 governed policy-family files into one PolicySpec (Batch 3).
+
+    All files must agree on ``policy_version``. This is the org-wide governed
+    contract the Policy Decision Point evaluates against (per-project overrides
+    are a documented future capability, see NOTES.md).
+    """
+    loaded = load_all_policy_files()
+    versions = {str(data["policy_version"]) for data in loaded.values()}
+    if len(versions) != 1:
+        detail = ", ".join(
+            f"{name}={data['policy_version']}" for name, data in sorted(loaded.items())
+        )
+        raise GovernanceError(f"Policy family files disagree on policy_version: {detail}")
+
+    def family(name: str, model_cls: type[BaseModel]) -> Any:
+        body = {key: value for key, value in loaded[name].items() if key != "policy_version"}
+        return model_cls(**body)
+
+    return PolicySpec(
+        policy_version=versions.pop(),
+        identity_policy=cast(IdentityPolicy, family("identity_policy", IdentityPolicy)),
+        tool_policy=cast(ToolPolicy, family("tool_policy", ToolPolicy)),
+        security_policy=cast(SecurityPolicy, family("security_policy", SecurityPolicy)),
+        build_policy=cast(BuildPolicy, family("build_policy", BuildPolicy)),
+        artifact_policy=cast(ArtifactPolicy, family("artifact_policy", ArtifactPolicy)),
+        approval_policy=cast(ApprovalPolicy, family("approval_policy", ApprovalPolicy)),
+        ai_policy=cast(AIPolicy, family("ai_policy", AIPolicy)),
+    )
 
 
 def load_all_governance_files() -> dict[str, dict[str, Any]]:

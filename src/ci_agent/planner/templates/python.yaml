@@ -1,0 +1,92 @@
+# Python stage template (Batch 3, Task B; Report Section 5.1 Phase A stages).
+#
+# The Planner resolves these entries into ExecutionPlan ResolvedSteps.
+# Tool name/version pairs MUST be approved in governance tool_policy.yaml —
+# an unapproved pair makes Planner.build_execution_plan raise
+# UnapprovedToolError (Section 18: "the model may propose, but policy approves").
+#
+# Control-flow stages (policy_gate, human_approval, merge_decision) are
+# represented as internal.* steps with no container image per the batch spec.
+stack: python
+stages:
+  - stage_id: checkout
+    tool_name: git
+    tool_version: "2.43"
+    container_image: null
+    command_template_id: "checkout.default"
+    timeout_seconds: 120
+    retryable: true
+    max_retries: 2
+
+  - stage_id: format_lint
+    tool_name: ruff
+    tool_version: "0.6.0"
+    container_image: "python:3.11-slim"
+    command_template_id: "lint.ruff"
+    timeout_seconds: 300
+    retryable: false
+    max_retries: 0
+
+  - stage_id: sast
+    tool_name: bandit
+    tool_version: "1.7.9"
+    container_image: "python:3.11-slim"
+    command_template_id: "sast.bandit"
+    timeout_seconds: 600
+    retryable: false
+    max_retries: 0
+
+  - stage_id: unit_tests
+    tool_name: pytest
+    tool_version: "8.2.0"
+    container_image: "python:3.11-slim"
+    command_template_id: "tests.pytest"
+    timeout_seconds: 900
+    retryable: true
+    max_retries: 1
+
+  - stage_id: secret_scan
+    tool_name: gitleaks
+    tool_version: "8.18.2"
+    container_image: "python:3.11-slim"
+    command_template_id: "scan.gitleaks"
+    timeout_seconds: 300
+    retryable: false
+    max_retries: 0
+
+  - stage_id: dependency_scan
+    tool_name: pip-audit
+    tool_version: "2.7.2"
+    container_image: "python:3.11-slim"
+    command_template_id: "scan.pip-audit"
+    timeout_seconds: 600
+    retryable: false
+    max_retries: 0
+
+  # --- Control-flow stages (Section 5.1): gates, not tool executions. ---
+  - stage_id: policy_gate
+    tool_name: internal.policy_gate
+    tool_version: "internal"
+    container_image: null
+    command_template_id: "internal.policy_gate"
+    timeout_seconds: 60
+    retryable: false
+    max_retries: 0
+
+  - stage_id: human_approval
+    tool_name: internal.human_approval
+    tool_version: "internal"
+    container_image: null
+    command_template_id: "internal.human_approval"
+    timeout_seconds: 60
+    retryable: false
+    max_retries: 0
+
+  - stage_id: merge_decision
+    tool_name: internal.merge_decision
+    tool_version: "internal"
+    container_image: null
+    command_template_id: "internal.merge_decision"
+    timeout_seconds: 60
+    retryable: false
+    max_retries: 0

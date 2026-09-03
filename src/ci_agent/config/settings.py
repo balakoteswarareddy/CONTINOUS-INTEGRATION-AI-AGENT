@@ -21,6 +21,11 @@ DATABASE_URL_VARIABLE: str = "DATABASE_URL"
 DEFAULT_DATABASE_URL: str = "sqlite:///./ci_agent.db"
 
 GITHUB_WEBHOOK_SECRET_VARIABLE: str = "GITHUB_WEBHOOK_SECRET"
+
+OPA_URL_VARIABLE: str = "OPA_URL"
+DEFAULT_OPA_URL: str = "http://localhost:8181"
+OPA_TIMEOUT_VARIABLE: str = "OPA_TIMEOUT_SECONDS"
+DEFAULT_OPA_TIMEOUT_SECONDS: float = 5.0
 # Dev-only fallback for CI_AGENT_ENV=local, documented in .env.example.
 # Never used in dev/prod — those fail startup if the env var is unset.
 LOCAL_DEV_WEBHOOK_SECRET: str = "ci-agent-local-dev-webhook-secret"
@@ -33,6 +38,8 @@ class Settings:
     env: str = DEFAULT_ENVIRONMENT
     database_url: str = DEFAULT_DATABASE_URL
     github_webhook_secret: str | None = None
+    opa_url: str = DEFAULT_OPA_URL
+    opa_timeout_seconds: float = DEFAULT_OPA_TIMEOUT_SECONDS
 
     @staticmethod
     def from_environment() -> Settings:

@@ -1,0 +1,24 @@
+# Open Policy Agent (Batch 3, Stage 7).
+#
+# Starts OPA as a genuinely separate process serving the governed Rego
+# policies (Report Section 6 recommends OPA as the vendor-neutral policy
+# engine; Section 4.2's Policy Decision Point talks to it over its REST API).
+#
+# Usage:  docker-compose up opa
+# Then:   http://localhost:8181  (health: GET /health)
+#
+# The image is pinned (reproducible policy evaluation); any OPA >= 0.64 works
+# because the policies use `import rego.v1` syntax (also forward-compatible
+# with OPA 1.x).
+services:
+  opa:
+    image: openpolicyagent/opa:0.67.1-static
+    command:
+      - "run"
+      - "--server"
+      - "--set=decision_logs.console=true"
+      - "/policies"
+    volumes:
+      - ./governance/rego:/policies:ro
+    ports:
+      - "8181:8181"

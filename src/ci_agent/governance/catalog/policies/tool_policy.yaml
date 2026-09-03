@@ -1,8 +1,26 @@
 # Tool policy family (CI-Agent Production Architecture Report, Section 6 — Tool).
 #
-# Deny-by-default posture: only explicitly pinned tool versions and approved
-# container images may run; everything not approved is rejected.
+# Fail-closed posture: only tool@version pairs and container images explicitly
+# listed here may run; everything else is rejected (Planner raises
+# UnapprovedToolError; tool_policy.rego fails the gate).
+#
+# Batch 3 note: the entries below approve exactly the pinned tools/images used
+# by the Batch 3 planner stage templates (python.yaml / nodejs.yaml, Section
+# 5.1 Phase A). This supersedes the Batch 1 "empty approvals" default — the
+# deny-by-default rule itself is unchanged for anything not listed here.
 policy_version: "1.0.0"
-approved_tool_versions: {}
-approved_images: []
+approved_tool_versions:
+  git: "2.43"
+  ruff: "0.6.0"
+  bandit: "1.7.9"
+  pytest: "8.2.0"
+  gitleaks: "8.18.2"
+  pip-audit: "2.7.2"
+  eslint: "9.9.0"
+  semgrep: "1.26.0"
+  vitest: "2.0.5"
+  npm-audit: "10.8.0"
+approved_images:
+  - "python:3.11-slim"
+  - "node:20-slim"
 forbidden_tools: []

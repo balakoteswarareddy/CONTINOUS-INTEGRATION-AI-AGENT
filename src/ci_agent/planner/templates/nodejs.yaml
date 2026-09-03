@@ -1,0 +1,85 @@
+# Node.js stage template (Batch 3, Task B; Report Section 5.1 Phase A stages).
+# Same structure and approval rules as python.yaml; see that file's header.
+stack: nodejs
+stages:
+  - stage_id: checkout
+    tool_name: git
+    tool_version: "2.43"
+    container_image: null
+    command_template_id: "checkout.default"
+    timeout_seconds: 120
+    retryable: true
+    max_retries: 2
+
+  - stage_id: format_lint
+    tool_name: eslint
+    tool_version: "9.9.0"
+    container_image: "node:20-slim"
+    command_template_id: "lint.eslint"
+    timeout_seconds: 300
+    retryable: false
+    max_retries: 0
+
+  - stage_id: sast
+    tool_name: semgrep
+    tool_version: "1.26.0"
+    container_image: "node:20-slim"
+    command_template_id: "sast.semgrep"
+    timeout_seconds: 600
+    retryable: false
+    max_retries: 0
+
+  - stage_id: unit_tests
+    tool_name: vitest
+    tool_version: "2.0.5"
+    container_image: "node:20-slim"
+    command_template_id: "tests.vitest"
+    timeout_seconds: 900
+    retryable: true
+    max_retries: 1
+
+  - stage_id: secret_scan
+    tool_name: gitleaks
+    tool_version: "8.18.2"
+    container_image: "node:20-slim"
+    command_template_id: "scan.gitleaks"
+    timeout_seconds: 300
+    retryable: false
+    max_retries: 0
+
+  - stage_id: dependency_scan
+    tool_name: npm-audit
+    tool_version: "10.8.0"
+    container_image: "node:20-slim"
+    command_template_id: "scan.npm-audit"
+    timeout_seconds: 600
+    retryable: false
+    max_retries: 0
+
+  # --- Control-flow stages (Section 5.1): gates, not tool executions. ---
+  - stage_id: policy_gate
+    tool_name: internal.policy_gate
+    tool_version: "internal"
+    container_image: null
+    command_template_id: "internal.policy_gate"
+    timeout_seconds: 60
+    retryable: false
+    max_retries: 0
+
+  - stage_id: human_approval
+    tool_name: internal.human_approval
+    tool_version: "internal"
+    container_image: null
+    command_template_id: "internal.human_approval"
+    timeout_seconds: 60
+    retryable: false
+    max_retries: 0
+
+  - stage_id: merge_decision
+    tool_name: internal.merge_decision
+    tool_version: "internal"
+    container_image: null
+    command_template_id: "internal.merge_decision"
+    timeout_seconds: 60
+    retryable: false
+    max_retries: 0

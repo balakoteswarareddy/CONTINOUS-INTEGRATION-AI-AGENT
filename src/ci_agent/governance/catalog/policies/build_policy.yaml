@@ -1,8 +1,18 @@
 # Build policy family (CI-Agent Production Architecture Report, Section 6 — Build).
 #
-# Deny-by-default posture: no base image or egress domain is allowed until
-# explicitly approved; builds must finish within the timeout ceiling.
+# Fail-closed posture: builds may only use allowlisted base images, contact
+# allowlisted egress domains, and must respect the timeout ceiling.
+#
+# Batch 3 note: base images now cover the Batch 3 planner templates
+# (python:3.11-slim / node:20-slim) and egress covers the package registries
+# those toolchains need. Anything unlisted remains denied.
 policy_version: "1.0.0"
-allowed_base_images: []
-allowed_egress_domains: []
+allowed_base_images:
+  - "python:3.11-slim"
+  - "node:20-slim"
+allowed_egress_domains:
+  - "pypi.org"
+  - "files.pythonhosted.org"
+  - "registry.npmjs.org"
+  - "github.com"
 max_timeout_seconds: 3600

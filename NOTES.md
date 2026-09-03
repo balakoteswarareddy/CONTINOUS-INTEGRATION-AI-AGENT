@@ -175,3 +175,78 @@ audit trail:      [('webhook_received', 'GENESIS'), ('run_created', 'c813f4e9f9f
 verify_chain:     True
 delivery marked:  True
 ```
+
+---
+
+# Batch 3 Notes — Policy Decision Point & Planner
+
+## Deviations & decisions (per Batch 3 Section 6/7 traceability rules)
+
+1. **`Planner.build_execution_plan` gained a required `run_id` keyword.** The
+   batch text says "Assign a run_id (passed in, comes from the ingress-created
+   run)" but the given signature had no run_id parameter; the keyword resolves
+   that contradiction.
+2. **`PolicyInputFacts` extends the spec'd five fields** with optional
+   `approvals`, `ai_invocation` and `run_id`: the PDP must evaluate approval
+   gates (which inherently need approval records as runtime facts) and must
+   persist every evaluation via `AuditStore.append_event(run_id, ...)`
+   (Task A requirement). Without these fields neither is possible.
+3. **Unknown `stage_id` in `evaluate_gate` evaluates ALL seven families**
+   (fail-closed breadth) and prepends a note reason, instead of erroring or
+   passing.
+4. **`internal.*` gate steps are exempt from tool approval** in both the
+   Planner cross-check and tool_policy.rego: Report Section 5.1 defines them
+   as control-flow stages, not tool executions ("represent them as
+   ResolvedStep entries with tool_name=internal.*").
+5. **PipelineSpec owns WHAT runs; the template owns HOW.** A pipeline stage
+   with no template entry raises `TemplateMismatchError` (hard fail, per the
+   guardrail against silent workarounds); template stages the spec doesn't
+   use are simply not planned. `TemplateMismatchError` is an additional
+   exception type beyond the spec'd `UnapprovedToolError` (flagged here).
+6. **Identity facts are checked only when provided** (identity binding
+   arrives with runner adapters); repository/branch checks are always
+   enforced by identity_policy.rego. Egress-domain runtime facts default to
+   empty until runners enforce networking; `step_timeout_seconds` (max across
+   plan steps) IS enforced against `max_timeout_seconds`.
+7. **Catalog updates** (governance config, not code): `tool_policy.yaml` now
+   approves exactly the pinned tools/images used by the Batch 3 templates,
+   and `build_policy.yaml` allowlists their base images + required package
+   registries. `identity_policy.yaml` keeps the Batch 2 example-org allowlist.
+   `policy_version` stays "1.0.0" (pre-release governed baseline; content
+   changes are tracked in these notes). Deny-by-default still holds for
+   anything unlisted.
+8. **OPA pinned to `openpolicyagent/opa:0.67.1-static`** in docker-compose;
+   Rego uses `import rego.v1` (works on OPA >= 0.64 and OPA 1.x). Live
+   verification in the development sandbox used a real OPA 0.70.0 binary
+   serving `governance/rego`.
+9. **Per-project policy overrides deferred** (spec: MVP uses the org-wide
+   governed catalog only). `PolicyDecisionPoint` accepts an optional
+   `PolicySpec` for that future capability and otherwise loads the catalog
+   via the new `governance.loader.load_policy_spec()`.
+10. **`respx` added as a dev dependency** (spec-preferred httpx mocking).
+11. **Runtime-fact derivation is explicit and documented** in
+    `policy_decision_point._build_runtime_facts`: repository/branch from the
+    pipeline spec; tools/images from the proposed plan;
+    `scans_executed` maps planner scan stages (secret_scan/dependency_scan/
+    sast) onto the security Rego's scan vocabulary.
+
+## Verification evidence (real OPA 0.70.0 serving governance/rego)
+
+```
+integration tests: 8 passed, 0 skipped (with OPA live)
+manual evaluate_gate against live OPA:
+  policy_gate (clean plan)          -> pass  | reasons: []
+  policy_gate (critical finding)    -> fail  | security_policy: severity "critical": 1 findings exceed threshold 0
+  human_approval (no approver groups) -> fail | approval_policy: ... (fail closed)
+  audit trail: 3x policy_decision entries; verify_chain == True
+```
+
+## Batch 3 sample ExecutionPlan (DoD 4, abridged)
+
+```
+run_id: run-dod4-1, pipeline_spec_ref: sha256:3cd34b57...
+checkout.git -> format_lint.ruff -> sast.bandit -> unit_tests.pytest
+  -> secret_scan.gitleaks -> dependency_scan.pip-audit
+  -> policy_gate.internal.policy_gate -> human_approval.internal.human_approval
+  -> merge_decision.internal.merge_decision
+```
