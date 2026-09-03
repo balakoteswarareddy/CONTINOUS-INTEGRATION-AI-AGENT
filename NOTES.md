@@ -1022,3 +1022,194 @@ the batch-scoped decision.
 provider selection (router already accepts it); stage-level Jenkins status
 views; Phase B terminal pipeline event; keyless signing (Batch 7 flag,
 unchanged).
+
+# Batch 9 Notes — Model Gateway + AI-Assisted Features (Section 13 Phase 4)
+
+Stage 20 (pluggable LLM abstraction with no-model fallback) and Stage 21
+(four AI-assisted features under guardrails), covering Report Sections 6
+(AI trust boundaries), 7.3 (prompt-injection/policy-bypass/data-exfiltration
+controls), 10 (explicit state), 12 (internal/no-model fallback) and 18
+(platform remains functional when the AI service is unavailable).
+**Phase 5 (ephemeral workers / autonomous operations) remains OUT OF SCOPE
+by standing instruction — nothing was built, stubbed, or referenced.**
+
+## Standing constraints honored (non-negotiable)
+
+- **No provider SDK.** The OpenAI/Anthropic providers speak raw HTTP via
+  `httpx` only; the abstract `ModelProvider` contract is the single type
+  shared code sees (vendor-neutral, mirroring the runner-adapter pattern).
+  No new dependencies beyond `httpx`.
+- **Default `AI_PROVIDER=noop`.** The platform is fully functional with
+  zero API keys — proven end to end by
+  `tests/integration/test_platform_without_ai.py` (full Phase A run +
+  all three AI endpoints + audit-chain verification with no model anywhere).
+- **AI output is ADVISORY ONLY.** Every feature return path carries an
+  explicit advisory-only code comment; no result is persisted as a policy
+  decision, approval, or evidence record; a human reviews before any action.
+- **Every invocation logged, hashes only.** `AIInvocationRecord`
+  (migration 0007) stores `sha256:`-prefixed `prompt_hash`/`response_hash`,
+  never raw prompt/response — the integration test byte-scans the database
+  file to prove no prompt/response text persists.
+
+## Package layout (`src/ci_agent/ai/`)
+
+- `models.py` — `AIRequest`/`AIResponse`, the shared `SECRET_PATTERNS`
+  list (PEM keys, GitHub/GitLab/OpenAI/Slack/AWS/Google tokens, raw Bearer
+  headers, line-anchored `ALL_CAPS_KEY=` env assignments),
+  `find_secret_pattern`/`redact_secret_patterns`, the fixed
+  `AI_FEATURES` vocabulary. `AIRequest` construction REJECTS any prompt
+  matching a secret pattern (hard check).
+- `errors.py` — `ModelProviderError`, `PromptBuildError`.
+- `gateway/` — `base.ModelProvider` (abstract contract: `complete` raises
+  only `ModelProviderError`, `is_available` never raises, stable
+  `provider_name`); `noop_provider` (the no-model fallback, a designed
+  behavior rather than an error path); `openai_provider` /
+  `anthropic_provider` (httpx-only, identical request discipline, keys
+  masked `sk-***` in logs); `provider_registry.ModelGateway` +
+  `build_gateway` — classification gate → breaker-guarded provider chain →
+  noop fallback; `invoke` NEVER raises; every outcome recorded.
+- `guardrails/` — `data_classifier` (deterministic
+  public/internal/confidential/restricted gate — no second model classifies
+  for the first), `prompt_builder` (fixed templates; the mandatory system
+  framing; a single UNTRUSTED DATA slot inside BEGIN/END markers; secret
+  refusal at build time; token-budget truncation at a word boundary,
+  logged), `response_validator` (policy-bypass/secret/excessive-length
+  checks; `[REDACTED]` sanitization; `ai_response_policy_bypass_detected`
+  audit event).
+- `features/` — `requirement_normalizer`, `failure_triage`,
+  `report_summarizer`, `pipeline_explainer`; each runs
+  classify → ceiling check → prompt → gateway → validate → deterministic
+  fallback. Per-feature content boundaries:
+  - **FailureTriage**: 500-line snippet cap; source-code lines STRIPPED
+    (tool output only); secrets redacted BEFORE classification; static
+    `REMEDIATION_HINTS` fallback.
+  - **ReportSummarizer**: structured-field allow-list — only `run_id`,
+    `outcome`, `risk_tier`, `stage_durations_ms`,
+    `policy_exceptions_count` ever enter a prompt (no `lead_time_ms`, no
+    `generated_at`, no free text).
+  - **RequirementNormalizer**: internal-at-most ceiling; suggestions apply
+    only to keys that already exist; the authoritative
+    `RequirementsResolver` still runs afterwards.
+  - **PipelineExplainer**: structure-only payload (stage/tool/template
+    metadata + dependency edges).
+
+## The five named guardrail enforcement tests (first-class deliverables)
+
+In `tests/unit/test_ai/test_guardrails/test_guardrail_enforcement.py`:
+
+1. `test_prompt_injection_is_treated_as_data_not_instructions` — repository
+   content saying "IGNORE ALL PREVIOUS INSTRUCTIONS…" lands strictly inside
+   the UNTRUSTED DATA slot; the instruction portion is unchanged; the
+   feature still answers the real task.
+2. `test_data_exfiltration_rejected_before_any_provider_call` — a request
+   classified above the policy ceiling never enters the provider chain:
+   zero provider calls, `policy_allowed=False` record, `ai_policy_rejected`
+   audit, noop response.
+3. `test_policy_bypass_response_flagged_with_fallback_and_no_leak` — a model
+   proposing to disable the security gate is flagged, discarded (not even
+   sanitized-returned — replaced by the deterministic fallback), and
+   audited.
+4. `test_platform_functional_without_ai` — with the committed
+   deny-by-default policy and `AI_PROVIDER=noop`, all four features answer
+   deterministically and the full `create_app` application serves traffic.
+5. `test_no_secret_in_prompt_raises_and_never_reaches_provider` — three
+   layers: `PromptBuilder` refuses secret-bearing data; `AIRequest`
+   construction rejects secret prompts; `FailureTriage` redacts to
+   `[REDACTED]` before any provider sees the snippet (asserted on the
+   captured prompt) and only the hash of the redacted prompt is stored.
+
+## Deny-by-default AI policy (governed, not configured)
+
+`governance/catalog/policies/ai_policy.yaml` is committed with
+`allowed_model_providers: []` and `allowed_data_classification: [public]`.
+Consequence: setting `AI_PROVIDER=openai` alone enables NOTHING — the
+gateway also requires the provider to be admitted by the governed policy
+file. Enabling a provider is a reviewed policy change (a PR), not an env
+var. Under the committed policy all four feature payloads (which classify
+as `internal`) are policy-rejected at the gate and answered by the
+deterministic fallback — invocations still logged with
+`policy_allowed=False`. The test suite uses an in-memory permissive
+`AIPolicy` (tests/unit/test_ai/conftest.py) so provider paths stay covered
+while the committed file stays deny-by-default.
+
+## Settings & wiring
+
+- `AI_PROVIDER` (default `noop`, validated against `VALID_AI_PROVIDERS` —
+  unknown values fail startup) and `MODEL_TOKEN_BUDGET` (default 4096) in
+  `config/settings.py`, following the established `*_VARIABLE` constant +
+  `from_environment` pattern.
+- `create_app` wires a dedicated `ai_breaker` (3 failures / 60s) +
+  `build_gateway(...)` + the four feature singletons onto `app.state`.
+- `admin_api.register_project` runs the normalizer BEFORE the authoritative
+  resolver; ANY normalizer failure (exception, fallback) leaves the
+  original intake answers untouched — onboarding can never be blocked by AI.
+- `DeveloperReport.triage` (optional `TriageResult`) closes the reporting
+  loop; the import cycle with `failure_triage` is broken by importing
+  `REMEDIATION_HINTS` lazily inside the fallback.
+
+## API surface (`ingress/ai_api.py`)
+
+- `POST /runs/{run_id}/triage/{stage_id}` — `X-Admin-Key` (401 missing /
+  403 wrong, `no-store`); 404 unknown run; 409 non-terminal run (triage is
+  post-hoc by design — explicit-state Section 10 discipline); findings are
+  stage-scoped from `FindingRecord`; caller `logs_snippet` capped at
+  200 000 chars.
+- `POST /runs/{run_id}/summarize` — same auth + state rules; summarizes the
+  management report (risk tier resolved from the registry, `unknown` if the
+  project is not registered).
+- `POST /pipeline-spec/explain` — NO auth (structure-only, public
+  classification): validates the `PipelineSpec` (422 on invalid input),
+  synthesizes a design-time `ExecutionPlan` (tool versions `unresolved`),
+  returns the advisory explanation.
+- None of the three mutates run state, gates, approvals, or evidence.
+
+## Integration-test deviation (documented choice)
+
+`tests/integration/test_platform_without_ai.py` uses the REAL `create_app`
+singletons end to end (ingress API, admin API, registry, audit store,
+gateway, features, report assembly — one SQLite DB, default noop provider)
+but replaces ONLY the OPA-backed Policy Decision Point with an in-process
+pass-through. Reason: this environment has no live OPA, so the Batch 5/7
+live-OPA integration tests skip here; faking only the PDP keeps the
+Section 18 proof runnable everywhere while every other singleton remains
+production wiring. The proof: onboarding through the real admin API (the
+noop normalizer run is invocation #1), a full Phase A run to
+`merge_decision_published` with ZERO additional AI participation, the three
+AI endpoints answering deterministically (invocations #2–#4), all four
+`AIInvocationRecord` rows carrying valid `sha256:` hashes with
+`policy_allowed=False` (deny-by-default gate), a byte-level scan proving no
+prompt/response text anywhere in the DB file, and a verifying audit chain.
+The live-OPA flows remain covered by the existing Batch 5/7 tests.
+
+## Provider HTTP discipline (httpx only, tested with respx)
+
+- **OpenAI**: `POST /v1/chat/completions`, `Authorization: Bearer`,
+  `messages=[{role: user}]`, `max_tokens`/`temperature` in the body;
+  429/401 surface as `status_code` in `ModelProviderError`.
+- **Anthropic**: `POST /v1/messages`, `x-api-key` + `anthropic-version:
+  2023-06-01` and NO `Authorization` header, REQUIRED top-level
+  `max_tokens`, content-block join (non-text blocks skipped), usage
+  reported as input+output tokens.
+- Both: timeouts/transport errors/malformed payloads normalized to
+  `ModelProviderError`; missing keys report `is_available() == False`.
+
+## Environment additions
+
+`.env.example` documents `AI_PROVIDER` (default `noop`) and
+`MODEL_TOKEN_BUDGET` (default 4096). No API-key variable is added: provider
+keys are read by the providers themselves from the standard
+`OPENAI_API_KEY` / `ANTHROPIC_API_KEY` (never logged, never persisted), and
+the platform never requires them.
+
+## Batch 9 gate results
+
+- Full suite: **853 passed, 27 skipped** (the pre-existing live-OPA and
+  live-credential skips; 0 failed / 0 errors).
+- AI suite: **148 tests** — gateway 52, guardrails 56 (51 unit + the five
+  named enforcement tests), features 27, endpoints 13 — plus the 1-test
+  integration proof and migration 0007 up/down/up (4/4 in
+  `tests/unit/test_db/test_migrations.py`).
+- ruff / black / mypy clean (126 source files, zero new dependencies).
+
+**Phase 4 (Stage 20 + Stage 21) is CLOSED. Phase 5 (ephemeral workers /
+autonomous operations) is explicitly deferred — out of scope, not built.**

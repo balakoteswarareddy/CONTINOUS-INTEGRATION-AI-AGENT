@@ -38,7 +38,14 @@ def test_alembic_upgrade_head_creates_all_tables(tmp_path: Path) -> None:
     try:
         inspector = sqlalchemy.inspect(engine)
         tables = set(inspector.get_table_names())
-        expected = {"run_records", "audit_log_entries", "processed_deliveries", "alembic_version"}
+        expected = {
+            "run_records",
+            "audit_log_entries",
+            "processed_deliveries",
+            "alembic_version",
+            # Batch 9: AI invocation log (hashes only, never content).
+            "ai_invocation_records",
+        }
         assert expected <= tables
 
         # Spot-check key columns of each table.
@@ -70,6 +77,22 @@ def test_alembic_upgrade_head_creates_all_tables(tmp_path: Path) -> None:
         assert expected_audit <= audit_columns
         delivery_columns = {col["name"] for col in inspector.get_columns("processed_deliveries")}
         assert {"delivery_id", "run_id", "received_at"} <= delivery_columns
+        ai_columns = {col["name"] for col in inspector.get_columns("ai_invocation_records")}
+        expected_ai = {
+            "id",
+            "run_id",
+            "feature",
+            "provider",
+            "context_classification",
+            "prompt_hash",
+            "response_hash",
+            "tokens_used",
+            "latency_ms",
+            "fallback_used",
+            "policy_allowed",
+            "created_at",
+        }
+        assert expected_ai <= ai_columns
     finally:
         engine.dispose()
 
@@ -147,5 +170,41 @@ def test_migration_0006_up_down_up(tmp_path: Path) -> None:
         inspector = sqlalchemy.inspect(engine)
         columns = {col["name"] for col in inspector.get_columns("run_records")}
         assert {"phase_b_wave2_branch", "phase_b_wave2_external_run_id"} <= columns
+    finally:
+        engine.dispose()
+
+
+def test_migration_0007_up_down_up(tmp_path: Path) -> None:
+    """Batch 9 migration 0007: ai_invocation_records survives up/down/up."""
+    db_path = tmp_path / "migration-0007.db"
+
+    up = _run_alembic(db_path, "upgrade", "head")
+    assert up.returncode == 0, f"upgrade head failed:\n{up.stdout}\n{up.stderr}"
+
+    engine = sqlalchemy.create_engine(f"sqlite:///{db_path}")
+    try:
+        inspector = sqlalchemy.inspect(engine)
+        assert "ai_invocation_records" in set(inspector.get_table_names())
+        assert "ix_ai_invocation_records_run_id" in {
+            index["name"] for index in inspector.get_indexes("ai_invocation_records")
+        }
+    finally:
+        engine.dispose()
+
+    down = _run_alembic(db_path, "downgrade", "0006")
+    assert down.returncode == 0, f"downgrade 0007 failed:\n{down.stdout}\n{down.stderr}"
+    engine = sqlalchemy.create_engine(f"sqlite:///{db_path}")
+    try:
+        inspector = sqlalchemy.inspect(engine)
+        assert "ai_invocation_records" not in set(inspector.get_table_names())
+    finally:
+        engine.dispose()
+
+    up_again = _run_alembic(db_path, "upgrade", "head")
+    assert up_again.returncode == 0, f"re-upgrade failed:\n{up_again.stdout}\n{up_again.stderr}"
+    engine = sqlalchemy.create_engine(f"sqlite:///{db_path}")
+    try:
+        inspector = sqlalchemy.inspect(engine)
+        assert "ai_invocation_records" in set(inspector.get_table_names())
     finally:
         engine.dispose()
