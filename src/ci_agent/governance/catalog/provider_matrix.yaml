@@ -1,0 +1,10 @@
+# Provider support matrix (Batch 1, Task C).
+#
+# Supported providers today. Intentionally minimal — grows in later batches as
+# adapters are implemented (Report Section 5/8 provider abstraction).
+version: "1.0.0"
+scm_providers: [github]
+runner_providers: [github_actions]
+security_tool_providers: []
+artifact_registries: []
+secrets_providers: []

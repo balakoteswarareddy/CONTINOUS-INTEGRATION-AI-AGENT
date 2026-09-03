@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ci-agent/governance/schemas/provider_matrix.schema.json",
+  "title": "Provider support matrix",
+  "description": "Validates catalog/provider_matrix.yaml — which SCM/runner/security-tool/registry/secrets providers are supported today. Not listed in Batch 1 Section 3's schema list but required by its DoD (provider matrix must validate) and by loader.py's contract that every governance file validates against a JSON Schema; delta documented in NOTES.md.",
+  "type": "object",
+  "required": [
+    "version",
+    "scm_providers",
+    "runner_providers",
+    "security_tool_providers",
+    "artifact_registries",
+    "secrets_providers"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+    },
+    "scm_providers": {
+      "$ref": "#/$defs/stringList"
+    },
+    "runner_providers": {
+      "$ref": "#/$defs/stringList"
+    },
+    "security_tool_providers": {
+      "$ref": "#/$defs/stringList"
+    },
+    "artifact_registries": {
+      "$ref": "#/$defs/stringList"
+    },
+    "secrets_providers": {
+      "$ref": "#/$defs/stringList"
+    }
+  },
+  "$defs": {
+    "stringList": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  }
+}

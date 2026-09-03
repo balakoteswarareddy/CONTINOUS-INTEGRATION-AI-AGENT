@@ -1,0 +1,8 @@
+# Tool policy family (CI-Agent Production Architecture Report, Section 6 — Tool).
+#
+# Deny-by-default posture: only explicitly pinned tool versions and approved
+# container images may run; everything not approved is rejected.
+policy_version: "1.0.0"
+approved_tool_versions: {}
+approved_images: []
+forbidden_tools: []

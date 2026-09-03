@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ci-agent/governance/schemas/policy_file.schema.json",
+  "title": "Policy family file",
+  "description": "Validates one policy-family file under governance/catalog/policies/ (CI-Agent Production Architecture Report, Section 6). A file carries a policy_version plus exactly one family body; the oneOf below enforces that exactly one family's full field set is present.",
+  "type": "object",
+  "required": ["policy_version"],
+  "additionalProperties": false,
+  "properties": {
+    "policy_version": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+    },
+    "allowed_repositories": {
+      "$ref": "#/$defs/stringList"
+    },
+    "allowed_branches": {
+      "$ref": "#/$defs/stringList"
+    },
+    "allowed_identities": {
+      "$ref": "#/$defs/stringList"
+    },
+    "approved_tool_versions": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1
+      },
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "approved_images": {
+      "$ref": "#/$defs/stringList"
+    },
+    "forbidden_tools": {
+      "$ref": "#/$defs/stringList"
+    },
+    "severity_thresholds": {
+      "type": "object",
+      "required": ["critical", "high", "medium", "low"],
+      "additionalProperties": false,
+      "properties": {
+        "critical": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "high": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "medium": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "low": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "require_secret_scan": {
+      "type": "boolean"
+    },
+    "require_sca": {
+      "type": "boolean"
+    },
+    "allowed_base_images": {
+      "$ref": "#/$defs/stringList"
+    },
+    "allowed_egress_domains": {
+      "$ref": "#/$defs/stringList"
+    },
+    "max_timeout_seconds": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 86400
+    },
+    "require_sbom": {
+      "type": "boolean"
+    },
+    "sbom_format": {
+      "enum": ["spdx", "cyclonedx"]
+    },
+    "require_signing": {
+      "type": "boolean"
+    },
+    "registry_allowlist": {
+      "$ref": "#/$defs/stringList"
+    },
+    "require_human_approval_for": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": ["low", "medium", "high", "regulated"]
+      }
+    },
+    "approver_groups": {
+      "$ref": "#/$defs/stringList"
+    },
+    "allowed_model_providers": {
+      "$ref": "#/$defs/stringList"
+    },
+    "allowed_data_classification": {
+      "type": "array",
+      "items": {
+        "enum": ["public", "internal", "confidential", "restricted"]
+      }
+    },
+    "require_human_override": {
+      "type": "boolean"
+    }
+  },
+  "oneOf": [
+    {
+      "title": "identity_policy",
+      "required": ["policy_version", "allowed_repositories", "allowed_branches", "allowed_identities"]
+    },
+    {
+      "title": "tool_policy",
+      "required": ["policy_version", "approved_tool_versions", "approved_images", "forbidden_tools"]
+    },
+    {
+      "title": "security_policy",
+      "required": ["policy_version", "severity_thresholds", "require_secret_scan", "require_sca"]
+    },
+    {
+      "title": "build_policy",
+      "required": ["policy_version", "allowed_base_images", "allowed_egress_domains", "max_timeout_seconds"]
+    },
+    {
+      "title": "artifact_policy",
+      "required": ["policy_version", "require_sbom", "sbom_format", "require_signing", "registry_allowlist"]
+    },
+    {
+      "title": "approval_policy",
+      "required": ["policy_version", "require_human_approval_for", "approver_groups"]
+    },
+    {
+      "title": "ai_policy",
+      "required": ["policy_version", "allowed_model_providers", "allowed_data_classification", "require_human_override"]
+    }
+  ],
+  "$defs": {
+    "stringList": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  }
+}

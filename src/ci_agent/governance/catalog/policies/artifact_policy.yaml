@@ -1,0 +1,9 @@
+# Artifact policy family (CI-Agent Production Architecture Report, Section 6 — Artifact).
+#
+# Conservative defaults: SBOM + signing are mandatory and promotion is only
+# possible to explicitly allowlisted registries.
+policy_version: "1.0.0"
+require_sbom: true
+sbom_format: spdx
+require_signing: true
+registry_allowlist: []

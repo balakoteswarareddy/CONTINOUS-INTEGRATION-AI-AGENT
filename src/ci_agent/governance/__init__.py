@@ -1,0 +1,35 @@
+"""Governance catalog loading and validation (Batch 1, Task C)."""
+
+from ci_agent.governance.loader import (
+    CATALOG_DIR,
+    POLICIES_DIR,
+    POLICY_FILE_NAMES,
+    SCHEMAS_DIR,
+    GovernanceError,
+    GovernanceLoadError,
+    GovernanceValidationError,
+    load_all_governance_files,
+    load_all_policy_files,
+    load_data_classification,
+    load_intake_schema,
+    load_policy_file,
+    load_provider_matrix,
+    validate_against_schema,
+)
+
+__all__ = [
+    "CATALOG_DIR",
+    "POLICIES_DIR",
+    "POLICY_FILE_NAMES",
+    "SCHEMAS_DIR",
+    "GovernanceError",
+    "GovernanceLoadError",
+    "GovernanceValidationError",
+    "load_all_governance_files",
+    "load_all_policy_files",
+    "load_data_classification",
+    "load_intake_schema",
+    "load_policy_file",
+    "load_provider_matrix",
+    "validate_against_schema",
+]

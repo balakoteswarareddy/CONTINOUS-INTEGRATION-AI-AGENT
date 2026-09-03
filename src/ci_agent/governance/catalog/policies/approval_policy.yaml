@@ -1,0 +1,9 @@
+# Approval policy family (CI-Agent Production Architecture Report, Section 6 — Approval).
+#
+# Conservative defaults: human approval is mandatory for high and regulated
+# risk tiers (Section 14 derived_risk_tier). approver_groups is intentionally
+# empty — the Policy Decision Point (later batch) must treat
+# "approval required but no approver groups configured" as fail-closed.
+policy_version: "1.0.0"
+require_human_approval_for: [high, regulated]
+approver_groups: []

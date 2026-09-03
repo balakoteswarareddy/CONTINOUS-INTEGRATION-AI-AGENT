@@ -1,0 +1,8 @@
+# Identity policy family (CI-Agent Production Architecture Report, Section 6 — Identity).
+#
+# Deny-by-default posture (Section 7 trust boundaries): no repository, branch
+# or identity may execute until it is explicitly allowlisted here.
+policy_version: "1.0.0"
+allowed_repositories: []
+allowed_branches: []
+allowed_identities: []
