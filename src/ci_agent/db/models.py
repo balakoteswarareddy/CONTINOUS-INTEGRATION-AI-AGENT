@@ -68,10 +68,6 @@ class RunRecord(Base):
     dispatch_branch: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # GitHub's workflow run id once resolved after workflow_dispatch.
     external_run_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    # --- Batch 8 addition (multi-runner scale) -------------------------------
-    # Which RunnerAdapter handled this run (github_actions | gitlab_ci |
-    # jenkins); webhooks and reconciliation resolve runs by provider + ids.
-    runner_provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
     # --- Batch 7 additions (Phase B supply-chain waves) ----------------------
     # The SECOND workflow run (Phase B) dispatched to the same branch after an
     # approved Phase A merge decision; evidence downloads use these coords.

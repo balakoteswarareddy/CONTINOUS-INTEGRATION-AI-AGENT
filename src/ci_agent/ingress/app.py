@@ -19,7 +19,6 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any
 
 from fastapi import FastAPI, Request
 
@@ -27,15 +26,6 @@ from ci_agent.adapters.base import DispatchRef
 from ci_agent.adapters.github_actions.adapter import GitHubActionsAdapter
 from ci_agent.adapters.github_actions.client import GitHubAuthConfig, GitHubClient
 from ci_agent.adapters.github_actions.compiler import REPORT_UPLOAD_STAGES
-from ci_agent.adapters.gitlab_ci.adapter import GitLabCIAdapter
-from ci_agent.adapters.gitlab_ci.client import GitLabClient
-from ci_agent.adapters.jenkins.adapter import JenkinsAdapter
-from ci_agent.adapters.jenkins.client import JenkinsClient
-from ci_agent.adapters.router import (
-    EXECUTION_LOCATION_TO_PROVIDER,
-    AdapterRouter,
-    UnknownRunnerProviderError,
-)
 from ci_agent.audit.audit_store import AuditStore
 from ci_agent.config.settings import Settings, get_settings
 from ci_agent.db.base import Base, create_engine, get_session_factory
@@ -48,7 +38,6 @@ from ci_agent.governance import (
     load_policy_spec,
 )
 from ci_agent.ingress import github_webhook
-from ci_agent.ingress.gitlab_webhook import router as gitlab_webhook_router
 from ci_agent.ingress.replay_guard import ReplayGuard
 from ci_agent.observer.execution_observer import ExecutionObserver
 from ci_agent.observer.github_events import ObserverEventHandlers
@@ -130,80 +119,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         installation_id=resolved_settings.github_installation_id,
     )
     github_client = GitHubClient(github_auth)
-    github_adapter = GitHubActionsAdapter(github_client)
-
-    # --- Batch 8: multi-runner registry + routing (Section 12) ---------------
-    # An adapter is registered ONLY when its configuration is present; the
-    # router selects per run from the project profile's execution_location and
-    # FAILS CLOSED on unknown/unregistered providers (no silent fallback).
-    runner_adapters: dict[str, Any] = {"github_actions": github_adapter}
-    runner_breakers: dict[str, CircuitBreaker] = {
-        "github_actions": CircuitBreaker(
-            "runner:github_actions", failure_threshold=5, recovery_timeout_seconds=60.0
-        )
-    }
-    gitlab_adapter: GitLabCIAdapter | None = None
-    if resolved_settings.gitlab_token and resolved_settings.gitlab_project_id:
-        gitlab_client = GitLabClient(
-            resolved_settings.gitlab_url,
-            resolved_settings.gitlab_token,
-            resolved_settings.gitlab_project_id,
-        )
-        gitlab_adapter = GitLabCIAdapter(gitlab_client)
-        runner_adapters["gitlab_ci"] = gitlab_adapter
-        runner_breakers["gitlab_ci"] = CircuitBreaker(
-            "runner:gitlab_ci", failure_threshold=5, recovery_timeout_seconds=60.0
-        )
-    jenkins_adapter: JenkinsAdapter | None = None
-    if (
-        resolved_settings.jenkins_url
-        and resolved_settings.jenkins_user
-        and resolved_settings.jenkins_api_token
-    ):
-        jenkins_client = JenkinsClient(
-            resolved_settings.jenkins_url,
-            resolved_settings.jenkins_user,
-            resolved_settings.jenkins_api_token,
-            resolved_settings.jenkins_job_name,
-        )
-        jenkins_adapter = JenkinsAdapter(jenkins_client)
-        runner_adapters["jenkins"] = jenkins_adapter
-        runner_breakers["jenkins"] = CircuitBreaker(
-            "runner:jenkins", failure_threshold=5, recovery_timeout_seconds=60.0
-        )
-
-    def _resolve_runner_provider(run_id: str) -> str:
-        """Persisted provider first (webhook/reconciliation paths); otherwise
-        the run's project profile's execution_location mapped via the
-        governed table. Refuses to guess (fail-closed selection)."""
-        with session_factory() as session:
-            run = session.get(RunRecord, run_id)
-            if run is None:
-                raise UnknownRunnerProviderError(f"run {run_id!r} does not exist")
-            if run.runner_provider:
-                return run.runner_provider
-            project_id = run.project_id
-        return _provider_for_project(project_id)
-
-    def _provider_for_project(project_id: str) -> str:
-        """Runner provider for a project per its profile (explicit table)."""
-        profile = project_registry.get_profile(project_id)
-        location = str(getattr(profile, "execution_location", "") or "")
-        provider = EXECUTION_LOCATION_TO_PROVIDER.get(location)
-        if provider is None:
-            raise UnknownRunnerProviderError(
-                f"project {project_id!r} execution_location {location!r} maps to no "
-                f"runner provider; known: {sorted(EXECUTION_LOCATION_TO_PROVIDER)}"
-            )
-        if provider not in runner_adapters:
-            raise UnknownRunnerProviderError(
-                f"project {project_id!r} needs runner {provider!r} but no adapter "
-                "is configured (missing credentials?) — fail closed, no fallback"
-            )
-        return provider
-
-    adapter = AdapterRouter(runner_adapters, _resolve_runner_provider, runner_breakers)
-
+    adapter = GitHubActionsAdapter(github_client)
     concurrency_guard = ConcurrencyGuard(resolved_settings.max_concurrent_runs_per_project)
     orchestrator = PhaseAOrchestrator(
         audit_store=audit_store,
@@ -245,15 +161,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 branch=run.dispatch_branch,
                 external_run_id=run.external_run_id,
             )
-            run_provider = run.runner_provider or "github_actions"
-        provider_adapter = runner_adapters.get(str(run_provider))
-        if provider_adapter is None or not hasattr(
-            provider_adapter, "download_stage_scan_artifact"
-        ):
-            provider_adapter = gha_adapter  # configured default (GitHub)
         tool_by_file = REPORT_UPLOAD_STAGES.get(stage_id, {})
         try:
-            contents = provider_adapter.download_stage_scan_artifact(dispatch_ref, stage_id)
+            contents = gha_adapter.download_stage_scan_artifact(dispatch_ref, stage_id)
         except Exception as exc:
             # Download failure (auth, transport, rate limit): record a
             # ParserWarning incident so the policy gate fails closed instead
@@ -302,12 +212,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 branch=run.phase_b_branch,
                 external_run_id=run.phase_b_external_run_id,
             )
-        provider_adapter = runner_adapters.get(run.runner_provider or "", gha_adapter)
         try:
-            contents: dict[str, str] = dict(
-                provider_adapter.download_stage_scan_artifact(dispatch_ref, stage_id)
-            )
-            return contents
+            return gha_adapter.download_stage_scan_artifact(dispatch_ref, stage_id)
         except Exception as exc:  # fail closed upstream: collector raises
             LOGGER.warning(
                 "phase B evidence download failed for run=%s stage=%s: %s",
@@ -381,7 +287,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.state.concurrency_guard = concurrency_guard
 
     application.include_router(github_webhook.router)
-    application.include_router(gitlab_webhook_router)
     application.include_router(admin_api_router)
     application.include_router(approval_api_router)
     application.include_router(report_api_router)

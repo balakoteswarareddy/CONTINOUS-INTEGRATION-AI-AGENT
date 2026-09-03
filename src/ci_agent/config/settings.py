@@ -27,19 +27,6 @@ GITHUB_APP_ID_VARIABLE: str = "GITHUB_APP_ID"
 GITHUB_APP_PRIVATE_KEY_PATH_VARIABLE: str = "GITHUB_APP_PRIVATE_KEY_PATH"
 GITHUB_INSTALLATION_ID_VARIABLE: str = "GITHUB_INSTALLATION_ID"
 
-# --- Batch 8: multi-runner adapters (Section 12 vendor neutrality) --------
-GITLAB_URL_VARIABLE: str = "GITLAB_URL"
-DEFAULT_GITLAB_URL: str = "https://gitlab.com"
-GITLAB_TOKEN_VARIABLE: str = "GITLAB_TOKEN"
-GITLAB_PROJECT_ID_VARIABLE: str = "GITLAB_PROJECT_ID"
-GITLAB_WEBHOOK_TOKEN_VARIABLE: str = "GITLAB_WEBHOOK_TOKEN"
-
-JENKINS_URL_VARIABLE: str = "JENKINS_URL"
-JENKINS_USER_VARIABLE: str = "JENKINS_USER"
-JENKINS_API_TOKEN_VARIABLE: str = "JENKINS_API_TOKEN"
-JENKINS_JOB_NAME_VARIABLE: str = "JENKINS_JOB_NAME"
-DEFAULT_JENKINS_JOB_NAME: str = "ci-agent"
-
 ADMIN_API_KEY_VARIABLE: str = "ADMIN_API_KEY"
 LOCAL_DEV_ADMIN_KEY: str = "ci-agent-local-admin-key"
 MAX_CONCURRENT_RUNS_VARIABLE: str = "MAX_CONCURRENT_RUNS_PER_PROJECT"
@@ -75,18 +62,6 @@ class Settings:
     # Batch 7: real cosign verify wrapper — resolved from PATH unless the
     # env var points at a specific binary (documented in .env.example).
     cosign_binary: str = DEFAULT_COSIGN_BINARY
-    # Batch 8: multi-runner adapters. All optional — an adapter is only
-    # CONSTRUCTED when its configuration is present (tokens via env only,
-    # never logged; Section 7). Absent config = that runner is not offered.
-    gitlab_url: str = DEFAULT_GITLAB_URL
-    gitlab_token: str | None = None
-    gitlab_project_id: str | None = None
-    # Webhook secret for /webhooks/gitlab (X-GITLAB-TOKEN; env only).
-    gitlab_webhook_token: str | None = None
-    jenkins_url: str | None = None
-    jenkins_user: str | None = None
-    jenkins_api_token: str | None = None
-    jenkins_job_name: str = DEFAULT_JENKINS_JOB_NAME
 
     @staticmethod
     def from_environment() -> Settings:
@@ -102,14 +77,6 @@ class Settings:
             github_webhook_secret=_cleaned_env(GITHUB_WEBHOOK_SECRET_VARIABLE) or None,
             admin_api_key=_cleaned_env(ADMIN_API_KEY_VARIABLE) or None,
             cosign_binary=os.environ.get(COSIGN_BINARY_VARIABLE, DEFAULT_COSIGN_BINARY),
-            gitlab_url=os.environ.get(GITLAB_URL_VARIABLE, DEFAULT_GITLAB_URL),
-            gitlab_token=_cleaned_env(GITLAB_TOKEN_VARIABLE),
-            gitlab_project_id=_cleaned_env(GITLAB_PROJECT_ID_VARIABLE),
-            gitlab_webhook_token=_cleaned_env(GITLAB_WEBHOOK_TOKEN_VARIABLE),
-            jenkins_url=_cleaned_env(JENKINS_URL_VARIABLE),
-            jenkins_user=_cleaned_env(JENKINS_USER_VARIABLE),
-            jenkins_api_token=_cleaned_env(JENKINS_API_TOKEN_VARIABLE),
-            jenkins_job_name=os.environ.get(JENKINS_JOB_NAME_VARIABLE, DEFAULT_JENKINS_JOB_NAME),
             max_concurrent_runs_per_project=_int_env(
                 MAX_CONCURRENT_RUNS_VARIABLE, DEFAULT_MAX_CONCURRENT_RUNS
             ),
