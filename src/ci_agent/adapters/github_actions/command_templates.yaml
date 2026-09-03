@@ -19,3 +19,19 @@
 "sast.semgrep": "semgrep scan --config auto --json --output semgrep-report.json"
 "tests.vitest": "npx vitest run --reporter=junit --outputFile=results.xml"
 "scan.npm-audit": "npm audit --json > npm-audit-report.json"
+
+# --- Phase B (Batch 7; Report Section 5.2) ---------------------------------
+# Every entry below is a fixed, reviewable allow-list value — never dynamic
+# command construction. The build/scan/sign/publish chain operates on ONE
+# locally-tagged image (ci-agent/app:ci); its content digest (docker inspect
+# .Id, captured into image-digest.txt) — NOT the tag — is the artifact
+# identity (Section 8: "use immutable digest as the primary identity").
+"build.default.python": "pytest --cov=src --cov-branch --cov-report=xml --junitxml=results.xml && python -m build --wheel --outdir dist/"
+"build.default.nodejs": "npm ci && npm run test:coverage && npm run build"
+"test.integration.python": "pytest tests/integration --junitxml=integration-results.xml"
+"test.integration.nodejs": "npx vitest run tests/integration --reporter=junit --outputFile=integration-results.xml"
+"container.build": "docker buildx build --load --tag ci-agent/app:ci --file Dockerfile . && docker inspect --format '{{.Id}}' ci-agent/app:ci > image-digest.txt"
+"sbom.syft": "syft ci-agent/app:ci -o spdx-json=sbom.json"
+"scan.trivy": "trivy image --format json --output trivy-report.json ci-agent/app:ci"
+"sign.cosign": "cosign sign --key env://COSIGN_KEY --output-signature image.sig --output-payload image.payload ci-agent/app:ci && cosign attest --key env://COSIGN_KEY --predicate provenance.json --type slsaprovenance ci-agent/app:ci > image-attestation.json"
+"publish.oci": "docker tag ci-agent/app:ci \"$CI_AGENT_PUBLISH_REF\" && docker push \"$CI_AGENT_PUBLISH_REF\""

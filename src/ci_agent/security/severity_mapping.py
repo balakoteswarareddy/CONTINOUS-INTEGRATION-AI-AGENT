@@ -20,6 +20,10 @@ defaults anywhere:
 * **eslint** — eslint JSON messages use severity 2=error, 1=warning; mapped
   to HIGH/LOW (documented; lint errors are quality blockers, not security
   metrics).
+* **trivy** (Batch 7) — 1:1 over Trivy's CVSS-derived vocabulary
+  (CRITICAL/HIGH/MEDIUM/LOW). Trivy's ``UNKNOWN`` (no CVSS available)
+  maps to MEDIUM — the SAME documented default as pip-audit's unscorable
+  published vulnerabilities: worth tracking, never silently ignorable.
 """
 
 from __future__ import annotations
@@ -66,6 +70,16 @@ SEMGREP_SEVERITY_MAP: dict[str, Severity] = {
     "INFO": Severity.LOW,
 }
 
+# Trivy image-scan severities (CRITICAL/HIGH/MEDIUM/LOW are 1:1; UNKNOWN is
+# the documented MEDIUM default — see module docstring).
+TRIVY_SEVERITY_MAP: dict[str, Severity] = {
+    "CRITICAL": Severity.CRITICAL,
+    "HIGH": Severity.HIGH,
+    "MEDIUM": Severity.MEDIUM,
+    "LOW": Severity.LOW,
+    "UNKNOWN": Severity.MEDIUM,
+}
+
 
 def gitleaks_severity() -> Severity:
     """EVERY gitleaks finding is CRITICAL (Section 5.1 Stage 7).
@@ -101,6 +115,7 @@ _TOOL_MAPS: dict[str, dict[str, Severity]] = {
     "npm-audit": NPM_AUDIT_SEVERITY_MAP,
     "eslint": ESLINT_SEVERITY_MAP,
     "semgrep": SEMGREP_SEVERITY_MAP,
+    "trivy": TRIVY_SEVERITY_MAP,
 }
 
 
@@ -131,6 +146,7 @@ __all__ = [
     "ESLINT_SEVERITY_MAP",
     "NPM_AUDIT_SEVERITY_MAP",
     "SEMGREP_SEVERITY_MAP",
+    "TRIVY_SEVERITY_MAP",
     "UnknownSeverityError",
     "gitleaks_severity",
     "map_severity",

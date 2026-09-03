@@ -181,6 +181,11 @@ def build_compliance_package(
             "policy_family": record.policy_family,
             "policy_version": record.policy_version,
             "reasons": json.loads(record.reasons_json) if record.reasons_json else [],
+            # Batch 7 (Section 9): waiver ID and grantor visibility — a WAIVED
+            # decision is never collapsed into a generic pass.
+            "exception_ids": (
+                json.loads(record.exception_ids_json) if record.exception_ids_json else []
+            ),
             "evaluated_at": record.evaluated_at.isoformat() if record.evaluated_at else None,
         }
 

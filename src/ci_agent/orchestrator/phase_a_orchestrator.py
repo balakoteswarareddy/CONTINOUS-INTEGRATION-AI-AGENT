@@ -26,6 +26,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+from collections.abc import Callable
 from typing import Any
 
 from sqlalchemy import select
@@ -49,6 +51,8 @@ from ci_agent.reliability.concurrency_guard import ConcurrencyGuard
 
 # Check Run name carrying the published merge decision (Section 5.1 stage 10).
 MERGE_DECISION_CHECK_NAME = "ci-agent merge decision"
+
+LOGGER = logging.getLogger("ci_agent.orchestrator.phase_a")
 
 # Fallback mirrors the governed approval_policy.yaml (require_human_approval_for).
 # create_app passes the LIVE PolicySpec list; tests may pass their own.
@@ -124,6 +128,12 @@ class PhaseAOrchestrator:
         # PolicySpec.approval_policy.require_human_approval_for — never
         # hardcoded at the call site.
         self._require_human_approval_for = require_human_approval_for
+        # Batch 7: optional Phase B start callback (wired in create_app).
+        # The orchestrators stay decoupled — Phase A knows only the callable
+        # contract. A Phase B start failure is AUDITED (and can be re-driven
+        # via PhaseBOrchestrator.start) but never corrupts the already-
+        # published Phase A merge decision.
+        self.on_phase_a_approved: Callable[[str], object] | None = None
 
     # ------------------------------------------------------------------ public
 
@@ -430,7 +440,21 @@ class PhaseAOrchestrator:
         source = RunState.APPROVED if approved else RunState.REJECTED
         self._transition(run_id, source, RunState.MERGE_DECISION_PUBLISHED)
         self._release_guard(run.project_id)
-        return {"state": RunState.MERGE_DECISION_PUBLISHED.value, "approved": approved}
+        result = {"state": RunState.MERGE_DECISION_PUBLISHED.value, "approved": approved}
+        if approved and self.on_phase_a_approved is not None:
+            # Batch 7 (Section 5.2): an APPROVED merge decision is the ONLY
+            # gateway into Phase B. Failures are audited loudly; the already
+            # published Phase A decision stands either way.
+            try:
+                self.on_phase_a_approved(run_id)
+            except Exception as exc:
+                LOGGER.warning("phase B start failed for run=%s: %s", run_id, exc)
+                self._audit(
+                    run_id,
+                    "phase_b_start_failed",
+                    {"detail": f"{type(exc).__name__}: {exc}"},
+                )
+        return result
 
     # --------------------------------------------------------- merge decision
 

@@ -27,6 +27,16 @@ EXPECTED_STATES = {
     "APPROVED",
     "REJECTED",
     "MERGE_DECISION_PUBLISHED",
+    # --- Phase B (Batch 7, Section 5.2 nine-stage flow) ---------------------
+    "BUILT",
+    "INTEGRATION_TESTED",
+    "COVERAGE_CHECKED",
+    "CONTAINER_BUILT",
+    "SBOM_GENERATED",
+    "IMAGE_SCANNED",
+    "SIGNED",
+    "PUBLISHED",
+    "EVIDENCE_RECORDED",
     "FAILED",
     "ERROR",
 }
@@ -34,12 +44,30 @@ EXPECTED_STATES = {
 
 def test_enum_has_exactly_the_specified_states() -> None:
     assert {member.name for member in RunState} == EXPECTED_STATES
-    assert len(RunState) == 14
+    assert len(RunState) == 23
 
 
 def test_terminal_states_have_no_outgoing_transitions() -> None:
-    for terminal in TERMINAL_RUN_STATES:
+    """FAILED/ERROR are absolute terminals; merge_decision_published's only
+    outgoing edge is the Phase B gateway (covered separately below)."""
+    from ci_agent.orchestrator.run_state import RunState
+
+    for terminal in TERMINAL_RUN_STATES - {RunState.MERGE_DECISION_PUBLISHED}:
         assert ALLOWED_RUN_TRANSITIONS[terminal] == frozenset()
+
+
+def test_merge_decision_published_only_leads_to_phase_b() -> None:
+    """Batch 7: an APPROVED merge decision is the ONLY Phase B gateway.
+
+    No Phase A or error state may reach BUILT — Phase B never runs against
+    unapproved code (Section 5.2; enforced by PhaseBOrchestrator.start and
+    tested there end-to-end).
+    """
+    assert ALLOWED_RUN_TRANSITIONS[RunState.MERGE_DECISION_PUBLISHED] == frozenset({RunState.BUILT})
+    for state, targets in ALLOWED_RUN_TRANSITIONS.items():
+        if state in (None, RunState.MERGE_DECISION_PUBLISHED):
+            continue
+        assert RunState.BUILT not in targets
 
 
 def test_happy_path_is_fully_connected() -> None:

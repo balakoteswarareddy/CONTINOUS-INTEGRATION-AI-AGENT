@@ -55,10 +55,23 @@ SCAN_STAGE_REPORT_FILES: dict[str, dict[str, str]] = {
 }
 
 # Stages whose raw report is uploaded (scan stages + lint's eslint JSON).
+# Batch 7 extends the same mechanism to the Phase B supply-chain stages: the
+# control plane parses these artifacts into SBOM/signature/provenance records
+# and (for image_scan) Trivy findings — same one-artifact-per-stage pattern.
 REPORT_UPLOAD_STAGES: dict[str, dict[str, str]] = {
     **SCAN_STAGE_REPORT_FILES,
     "format_lint": {"eslint-report.json": "eslint"},
+    # --- Phase B (Section 5.2) ---
+    "container_build": {"image-digest.txt": "docker-inspect"},
+    "sbom_generate": {"sbom.json": "syft"},
+    "image_scan": {"trivy-report.json": "trivy"},
+    "sign_attest": {"image.sig": "cosign", "image-attestation.json": "cosign"},
 }
+
+# The publish step pushes to $CI_AGENT_PUBLISH_REF — a repo/organization
+# configuration VARIABLE (not a credential) supplied by the runner
+# environment. The compiler injects only this name binding; never a secret.
+PUBLISH_ENV_NAME = "CI_AGENT_PUBLISH_REF"
 
 SCAN_ARTIFACT_NAME_PREFIX = "ci-agent-scan-"
 
@@ -244,6 +257,12 @@ def compile_to_github_actions(
         workflow["jobs"][job_id_for_stage(stage_id)] = _stage_job(step, command, needs)
         stage_job_ids.append(job_id_for_stage(stage_id))
 
+    if "publish" in by_stage:
+        # Batch 7: the publish target comes from a configuration variable of
+        # the runner environment; the workflow NEVER references the secrets
+        # context (Section 7.3 — the agent never handles credentials).
+        workflow["env"] = {**workflow["env"], PUBLISH_ENV_NAME: "${{ vars.CI_AGENT_PUBLISH_REF }}"}
+
     summary = _summary_job()
     summary["needs"] = stage_job_ids
     workflow["jobs"][SUMMARY_JOB_ID] = summary
@@ -253,4 +272,13 @@ def compile_to_github_actions(
     reparsed = yaml.safe_load(text)
     if not isinstance(reparsed, dict) or "jobs" not in reparsed:  # pragma: no cover - defensive
         raise ValueError("compiled workflow YAML failed round-trip validation")
+    # Section 5.2 Stage 2 / Section 7.3: the compiled workflow must NEVER
+    # inject credentials — not even for integration tests. The secrets
+    # context appearing anywhere in the generated YAML is a hard compile
+    # failure (enforced check, not documentation).
+    if "secrets." in text:
+        raise ValueError(
+            "compiled workflow references the secrets context — the agent "
+            "never injects credentials into pipeline steps (Section 7.3)"
+        )
     return text

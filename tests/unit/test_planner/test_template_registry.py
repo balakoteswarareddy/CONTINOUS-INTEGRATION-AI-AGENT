@@ -33,6 +33,16 @@ class TestLoading:
             "policy_gate",
             "human_approval",
             "merge_decision",
+            # --- Phase B (Batch 7, Section 5.2) ---
+            "full_build",
+            "integration_tests",
+            "coverage_gate",
+            "container_build",
+            "sbom_generate",
+            "image_scan",
+            "sign_attest",
+            "publish",
+            "record_evidence",
         ]
         # Section 5.1 Phase A tool coverage.
         tools = {stage["tool_name"] for stage in template["stages"]}
@@ -46,6 +56,9 @@ class TestLoading:
             "internal.policy_gate",
             "internal.human_approval",
             "internal.merge_decision",
+            # Batch 7 (Section 5.2): internal Phase B stages.
+            "internal.coverage_gate",
+            "internal.record_evidence",
         }
         # Gate steps carry no container image (batch spec requirement).
         for stage in template["stages"]:

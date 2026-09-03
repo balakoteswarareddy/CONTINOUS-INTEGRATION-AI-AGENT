@@ -13,6 +13,7 @@ from ci_agent.security.parsers.eslint_parser import EslintParser
 from ci_agent.security.parsers.gitleaks_parser import GitleaksParser
 from ci_agent.security.parsers.npm_audit_parser import NpmAuditParser
 from ci_agent.security.parsers.pip_audit_parser import PipAuditParser
+from ci_agent.security.parsers.trivy_parser import TrivyParser
 
 
 class UnknownParserError(KeyError):
@@ -25,6 +26,7 @@ _REGISTRY: dict[str, type[FindingParser]] = {
     PipAuditParser.tool_name: PipAuditParser,
     NpmAuditParser.tool_name: NpmAuditParser,
     EslintParser.tool_name: EslintParser,
+    TrivyParser.tool_name: TrivyParser,
 }
 
 # Alias table: alternate spellings seen in tool outputs / templates.

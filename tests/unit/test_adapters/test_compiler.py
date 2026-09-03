@@ -177,3 +177,138 @@ class TestCommandAllowListEnforcement:
         gate_job = workflow["jobs"]["stage-policy_gate"]
         assert "container" not in gate_job
         assert "orchestrated by ci-agent control plane" in gate_job["steps"][0]["run"]
+
+
+# --------------------------------------------------------------------------
+# Batch 7: Phase B compilation (Section 5.2 nine-stage supply-chain flow).
+# --------------------------------------------------------------------------
+
+PHASE_B_STAGES = [
+    ("checkout", "git", "2.43", None, "checkout.default", []),
+    (
+        "merge_decision",
+        "internal.merge_decision",
+        "internal",
+        None,
+        "internal.merge_decision",
+        ["checkout"],
+    ),
+    (
+        "full_build",
+        "build",
+        "1.2.1",
+        "python:3.11-slim",
+        "build.default.python",
+        ["merge_decision"],
+    ),
+    (
+        "integration_tests",
+        "pytest",
+        "8.2.0",
+        "python:3.11-slim",
+        "test.integration.python",
+        ["full_build"],
+    ),
+    (
+        "coverage_gate",
+        "internal.coverage_gate",
+        "internal",
+        None,
+        "internal.coverage_gate",
+        ["integration_tests"],
+    ),
+    (
+        "container_build",
+        "docker",
+        "27.3.1",
+        "docker:27.3.1-cli",
+        "container.build",
+        ["coverage_gate"],
+    ),
+    ("sbom_generate", "syft", "1.18.1", "anchore/syft:v1.18.1", "sbom.syft", ["container_build"]),
+    ("image_scan", "trivy", "0.58.0", "aquasec/trivy:0.58.0", "scan.trivy", ["sbom_generate"]),
+    (
+        "sign_attest",
+        "cosign",
+        "2.4.1",
+        "sigstore/cosign:v2.4.1",
+        "sign.cosign",
+        ["image_scan"],
+    ),
+    ("publish", "docker", "27.3.1", "docker:27.3.1-cli", "publish.oci", ["sign_attest"]),
+    (
+        "record_evidence",
+        "internal.record_evidence",
+        "internal",
+        None,
+        "internal.record_evidence",
+        ["publish"],
+    ),
+]
+
+
+def build_phase_b_plan() -> ExecutionPlan:
+    """Phase A terminal gate + the nine Phase B stages (one combined plan)."""
+    return ExecutionPlan(
+        run_id="run-b7",
+        pipeline_spec_ref="sha256:def",
+        resolved_steps=[
+            ResolvedStep(
+                step_id=f"{sid}.{tool}",
+                stage_id=sid,
+                tool_name=tool,
+                tool_version=version,
+                container_image=image,
+                command_template_id=template,
+                timeout_seconds=300,
+                retry_policy=RetryPolicy(),
+                depends_on=deps,
+            )
+            for sid, tool, version, image, template, deps in PHASE_B_STAGES
+        ],
+    )
+
+
+class TestPhaseBCompilation:
+    def setup_method(self) -> None:
+        self.yaml_text = compile_to_github_actions(build_phase_b_plan())
+        self.workflow = yaml.safe_load(self.yaml_text)
+
+    def test_phase_b_jobs_come_after_phase_a_jobs(self) -> None:
+        job_ids = list(self.workflow["jobs"])
+        assert job_ids.index("stage-checkout") < job_ids.index("stage-full_build")
+        assert job_ids.index("stage-merge_decision") < job_ids.index("stage-full_build")
+        assert job_ids.index("stage-record_evidence") < job_ids.index("ci-agent-results")
+
+    def test_full_build_needs_chain_reaches_phase_a_terminal_gate(self) -> None:
+        """needs: chains Phase B to Phase A's terminal gate job."""
+        assert self.workflow["jobs"]["stage-full_build"]["needs"] == ["stage-merge_decision"]
+
+    def test_one_job_per_phase_b_stage(self) -> None:
+        for stage_id, *_ in PHASE_B_STAGES:
+            job_id = job_id_for_stage(stage_id)
+            assert job_id in self.workflow["jobs"]
+            assert self.workflow["jobs"][job_id]["name"] == stage_id
+
+    def test_phase_b_report_uploads(self) -> None:
+        steps = self.workflow["jobs"]["stage-image_scan"]["steps"]
+        uploads = [s for s in steps if s.get("uses", "").startswith("actions/upload-artifact")]
+        assert any(s["with"]["name"] == "ci-agent-scan-image_scan" for s in uploads)
+        sign_steps = self.workflow["jobs"]["stage-sign_attest"]["steps"]
+        assert any(s.get("with", {}).get("name") == "ci-agent-scan-sign_attest" for s in sign_steps)
+
+    def test_publish_env_var_injected_not_secrets(self) -> None:
+        assert self.workflow["env"]["CI_AGENT_PUBLISH_REF"] == "${{ vars.CI_AGENT_PUBLISH_REF }}"
+
+    def test_never_injects_secrets_context(self) -> None:
+        assert "secrets." not in self.yaml_text
+
+    def test_phase_b_commands_are_verbatim_registry_values(self) -> None:
+        registry = CommandTemplateRegistry()
+        for stage_id, tool, _v, _i, template, _d in PHASE_B_STAGES:
+            if tool.startswith("internal.") or stage_id == "checkout":
+                continue
+            job = self.workflow["jobs"][job_id_for_stage(stage_id)]
+            tool_step = next(s for s in job["steps"] if s.get("id") == "tool" and "run" in s)
+            command_line = tool_step["run"].splitlines()[1]
+            assert command_line == registry.get_command(template)

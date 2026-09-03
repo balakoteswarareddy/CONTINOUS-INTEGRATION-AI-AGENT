@@ -38,6 +38,10 @@ STAGE_POLICY_FAMILIES: dict[str, tuple[str, ...]] = {
     "tool_gate": ("tool_policy",),
     "build_gate": ("build_policy",),
     "artifact_gate": ("artifact_policy",),
+    # Batch 7 (Section 5.2 Stage 8: "Push only after required gates pass"):
+    # the publish gate checks BOTH the image-scan findings (security) and the
+    # artifact supply-chain requirements (SBOM/signature present).
+    "publish_gate": ("security_policy", "artifact_policy"),
     "human_approval": ("approval_policy",),
     "merge_decision": ("approval_policy", "ai_policy"),
     "plan_approval": ("identity_policy", "tool_policy", "build_policy", "artifact_policy"),
@@ -80,6 +84,7 @@ class PolicyDecisionPoint:
         audit_store: AuditStore,
         policy_spec: PolicySpec | None = None,
         session_factory: sessionmaker[Session] | None = None,
+        exception_service: Any | None = None,
     ) -> None:
         self._opa_client = opa_client
         self._audit_store = audit_store
@@ -87,6 +92,12 @@ class PolicyDecisionPoint:
         # Optional persistence of every decision as a PolicyDecisionRecord row
         # (Batch 5): evidence assembly reads these instead of scraping logs.
         self._session_factory = session_factory
+        # Batch 7 (Task D; Sections 6/18): read-only exception lookup. The PDP
+        # may WAIVE a would-be fail when a governed, non-expired exception
+        # covers it — it can NEVER CREATE or extend an exception (Section 7.3
+        # "Policy bypass"; inspection-tested). The service is the sole write
+        # path and lives behind the admin API.
+        self._exception_service = exception_service
 
     @property
     def policy_version(self) -> str:
@@ -104,6 +115,7 @@ class PolicyDecisionPoint:
 
         reasons: list[str] = list(notes)
         overall = PolicyDecision.PASS
+        failed_families: list[str] = []
         family_results: dict[str, Any] = {}
         for family in families:
             try:
@@ -121,6 +133,7 @@ class PolicyDecisionPoint:
                 # A waiver never flips an overall fail; it only records context.
                 continue
             overall = PolicyDecision.FAIL
+            failed_families.append(family)
             if family_decision == "fail":
                 if family_reasons:
                     reasons.extend(f"{family}: {reason}" for reason in family_reasons)
@@ -130,16 +143,79 @@ class PolicyDecisionPoint:
                 # Missing/unrecognized decision -> fail closed.
                 reasons.append(f"{family}: policy package returned no decision — fail closed")
 
+        exception_ids: list[str] = []
+        if overall is PolicyDecision.FAIL:
+            waiver = self._try_waive(stage_id, facts, failed_families)
+            if waiver is not None:
+                exception_ids, waiver_reasons = waiver
+                overall = PolicyDecision.WAIVED
+                reasons = [*waiver_reasons, *reasons]
+
         decision_result = PolicyDecisionResult(
             decision=overall,
             reasons=reasons,
             policy_family="aggregated",
             policy_version=self._policy_spec.policy_version,
+            exception_ids=exception_ids,
         )
         self._persist(
             stage_id, facts, decision_result, families, family_results, opa_unavailable=False
         )
         return decision_result
+
+    # ------------------------------------------------------- exception waiver
+
+    def _try_waive(
+        self, stage_id: str, facts: PolicyInputFacts, failed_families: list[str]
+    ) -> tuple[list[str], list[str]] | None:
+        """Convert a would-be FAIL into WAIVED when governed exceptions cover it.
+
+        Batch 7 (Task D; Sections 6 and 18): reads ACTIVE exceptions ONLY —
+        expiry is derived from the clock inside the service, so an expired or
+        revoked exception waives nothing. Conservative matching:
+
+        * EVERY failed family must be covered — a partial waiver still fails
+          (a remaining uncovered violation cannot ride along on an unrelated
+          exception);
+        * for security_policy, the family is covered only when EVERY failing
+          finding's rule id is covered (rule-scoped exceptions cover exactly
+          their rule; wildcards cover the family);
+        * project scope must match the pipeline spec's project_id.
+
+        Returns ``(exception_ids, reasons)`` or ``None`` when uncovered.
+        """
+        if self._exception_service is None or not failed_families:
+            return None
+        project_id = str((facts.pipeline_spec or {}).get("project_id", ""))
+        if not project_id:
+            return None
+        exception_ids: list[str] = []
+        waiver_reasons: list[str] = []
+        for family in failed_families:
+            if family == "security_policy":
+                failing_rules: list[str] = sorted(
+                    {str(f["rule_id"]) for f in facts.findings if f.get("rule_id")}
+                )
+                covering: dict[str, Any] = {}
+                rules_to_check: list[str | None] = list(failing_rules) if failing_rules else [None]
+                for rule in rules_to_check:
+                    match = self._exception_service.find_covering_exception(
+                        project_id, family, rule
+                    )
+                    if match is None:
+                        return None  # an uncovered rule -> no waiver for the family
+                    covering[match.id] = match
+                exception_ids.extend(sorted(covering))
+            else:
+                match = self._exception_service.find_covering_exception(project_id, family, None)
+                if match is None:
+                    return None
+                exception_ids.append(match.id)
+            waiver_reasons.append(
+                f"{family}: waived by exception for project {project_id!r} "
+                "(granted outside the model; expires automatically)"
+            )
+        return exception_ids, waiver_reasons
 
     # ------------------------------------------------------------------ internals
 
@@ -230,6 +306,8 @@ class PolicyDecisionPoint:
             "risk_tier": (facts.project_profile or {}).get("risk_tier"),
             "approvals": facts.approvals,
             "ai_invocation": facts.ai_invocation,
+            # Batch 7: supply-chain artifact facts for artifact_policy.rego.
+            "artifacts": facts.artifacts,
         }
 
     def _persist(
@@ -254,6 +332,7 @@ class PolicyDecisionPoint:
                 "policy_version": result.policy_version,
                 "families_evaluated": list(families),
                 "family_results": family_results,
+                "exception_ids": list(result.exception_ids),
                 "opa_unavailable": opa_unavailable,
                 "evaluation_id": str(uuid.uuid4()),
             },
@@ -268,6 +347,7 @@ class PolicyDecisionPoint:
                         policy_family=result.policy_family,
                         policy_version=result.policy_version,
                         reasons_json=json.dumps(result.reasons),
+                        exception_ids_json=json.dumps(result.exception_ids),
                         evaluated_at=utcnow(),
                     )
                 )

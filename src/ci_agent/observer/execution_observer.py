@@ -91,7 +91,11 @@ class ExecutionObserver:
     findings must exist before any policy gate that depends on them.
     """
 
-    SCAN_STAGE_IDS: frozenset[str] = frozenset({"sast", "secret_scan", "dependency_scan"})
+    # Batch 7: Phase B's image_scan (Trivy) joins the pre-terminal evidence
+    # collection set — its findings must exist before the publish gate.
+    SCAN_STAGE_IDS: frozenset[str] = frozenset(
+        {"sast", "secret_scan", "dependency_scan", "image_scan"}
+    )
 
     def __init__(self, session_factory: sessionmaker[Session], audit_store: AuditStore) -> None:
         self._session_factory = session_factory

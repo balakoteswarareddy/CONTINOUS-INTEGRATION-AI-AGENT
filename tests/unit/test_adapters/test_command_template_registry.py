@@ -74,3 +74,34 @@ class TestLoading:
         bad.write_text('"bad.template": 42\n', encoding="utf-8")
         with pytest.raises(ValueError, match="must be a string or null"):
             load_command_templates(bad)
+
+
+class TestPhaseBAllowList:
+    """Batch 7 (Section 5.2): build/sbom/scan/sign/publish command templates."""
+
+    def test_phase_b_ids_resolve_verbatim(self) -> None:
+        assert (
+            CommandTemplateRegistry().get_command("container.build")
+            == "docker buildx build --load --tag ci-agent/app:ci --file Dockerfile . "
+            "&& docker inspect --format '{{.Id}}' ci-agent/app:ci > image-digest.txt"
+        )
+        assert (
+            CommandTemplateRegistry().get_command("sbom.syft")
+            == "syft ci-agent/app:ci -o spdx-json=sbom.json"
+        )
+        assert (
+            CommandTemplateRegistry().get_command("scan.trivy")
+            == "trivy image --format json --output trivy-report.json ci-agent/app:ci"
+        )
+        assert "cosign sign" in CommandTemplateRegistry().get_command("sign.cosign")
+        assert "docker push" in CommandTemplateRegistry().get_command("publish.oci")
+
+    def test_build_and_integration_templates_per_stack(self) -> None:
+        registry = CommandTemplateRegistry()
+        assert registry.get_command("build.default.python").startswith("pytest --cov")
+        assert "python -m build" in registry.get_command("build.default.python")
+        assert registry.get_command("build.default.nodejs").startswith("npm ci")
+        assert registry.get_command("test.integration.python").startswith(
+            "pytest tests/integration"
+        )
+        assert "vitest run tests/integration" in registry.get_command("test.integration.nodejs")

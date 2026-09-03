@@ -18,12 +18,15 @@ from ci_agent.core.models.common import ApprovalStatus, Severity
 from ci_agent.core.models.evidence_model import (
     ApprovalRecord as ApprovalEvidence,
 )
-from ci_agent.core.models.evidence_model import EvidenceModel, Finding
+from ci_agent.core.models.evidence_model import ArtifactRef, EvidenceModel, Finding
 from ci_agent.db.models import (
     ApprovalRecord,
+    ArtifactRecord,
     FindingRecord,
     PolicyDecisionRecord,
+    ProvenanceRecordRow,
     RunRecord,
+    SignatureRecordRow,
     StageExecutionRecord,
 )
 
@@ -103,6 +106,57 @@ class EvidenceAssembler:
             for row in approval_rows
         ]
 
+        # Batch 7 (Section 8): REAL supply-chain artifacts — digest-based
+        # identity (never a tag), with SBOM/signature references as recorded.
+        # This is the field empty since Batch 1; populated for real now.
+        artifact_rows = (
+            self._session_factory()
+            .execute(
+                select(ArtifactRecord)
+                .where(ArtifactRecord.run_id == run_id)
+                .order_by(ArtifactRecord.id)
+            )
+            .scalars()
+            .all()
+        )
+        artifacts = [
+            ArtifactRef(
+                digest=row.digest,
+                registry=row.registry_host,
+                sbom_ref=row.sbom_ref,
+                signature_ref=row.signature_ref,
+            )
+            for row in artifact_rows
+        ]
+        # Attestations (Section 8 rows — empty since Batch 1, populated for
+        # real now): cosign signature references + in-toto/SLSA provenance
+        # attestations, each a verifiable pointer with its integrity hash —
+        # never key material, never raw payloads.
+        signature_rows = (
+            self._session_factory()
+            .execute(
+                select(SignatureRecordRow)
+                .where(SignatureRecordRow.run_id == run_id)
+                .order_by(SignatureRecordRow.id)
+            )
+            .scalars()
+            .all()
+        )
+        provenance_rows = (
+            self._session_factory()
+            .execute(
+                select(ProvenanceRecordRow)
+                .where(ProvenanceRecordRow.run_id == run_id)
+                .order_by(ProvenanceRecordRow.id)
+            )
+            .scalars()
+            .all()
+        )
+        attestations = [f"cosign-signature:{row.signature_ref}" for row in signature_rows]
+        attestations.extend(
+            f"{row.predicate_type}:{row.attestation_ref}" for row in provenance_rows
+        )
+
         timestamps: dict[str, object] = {}
         if run.created_at:
             timestamps["trigger_received_at"] = run.created_at
@@ -122,8 +176,8 @@ class EvidenceAssembler:
             tool_versions={},
             findings=findings,
             approvals=approvals,
-            artifacts=[],  # SBOM/artifact signing arrive with Batch 7
-            attestations=[],
+            artifacts=artifacts,  # Batch 7: real digest-identified artifacts
+            attestations=attestations,  # Batch 7: signature + provenance refs
             timestamps=timestamps,
         )
 

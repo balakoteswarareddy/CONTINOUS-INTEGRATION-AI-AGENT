@@ -32,6 +32,9 @@ LOCAL_DEV_ADMIN_KEY: str = "ci-agent-local-admin-key"
 MAX_CONCURRENT_RUNS_VARIABLE: str = "MAX_CONCURRENT_RUNS_PER_PROJECT"
 DEFAULT_MAX_CONCURRENT_RUNS: int = 3
 
+COSIGN_BINARY_VARIABLE: str = "CI_AGENT_COSIGN_BINARY"
+DEFAULT_COSIGN_BINARY: str = "cosign"
+
 OPA_URL_VARIABLE: str = "OPA_URL"
 DEFAULT_OPA_URL: str = "http://localhost:8181"
 OPA_TIMEOUT_VARIABLE: str = "OPA_TIMEOUT_SECONDS"
@@ -56,6 +59,9 @@ class Settings:
     github_installation_id: str | None = None
     admin_api_key: str | None = None
     max_concurrent_runs_per_project: int = DEFAULT_MAX_CONCURRENT_RUNS
+    # Batch 7: real cosign verify wrapper — resolved from PATH unless the
+    # env var points at a specific binary (documented in .env.example).
+    cosign_binary: str = DEFAULT_COSIGN_BINARY
 
     @staticmethod
     def from_environment() -> Settings:
@@ -70,6 +76,7 @@ class Settings:
             database_url=_cleaned_env(DATABASE_URL_VARIABLE) or DEFAULT_DATABASE_URL,
             github_webhook_secret=_cleaned_env(GITHUB_WEBHOOK_SECRET_VARIABLE) or None,
             admin_api_key=_cleaned_env(ADMIN_API_KEY_VARIABLE) or None,
+            cosign_binary=os.environ.get(COSIGN_BINARY_VARIABLE, DEFAULT_COSIGN_BINARY),
             max_concurrent_runs_per_project=_int_env(
                 MAX_CONCURRENT_RUNS_VARIABLE, DEFAULT_MAX_CONCURRENT_RUNS
             ),

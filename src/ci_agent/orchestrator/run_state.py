@@ -28,6 +28,18 @@ class RunState(str, Enum):
     APPROVED = "approved"
     REJECTED = "rejected"
     MERGE_DECISION_PUBLISHED = "merge_decision_published"
+    # --- Phase B (Batch 7; Report Section 5.2 nine-stage flow) ---------------
+    # Phase B begins only from an APPROVED Phase A merge decision; it is
+    # driven by PhaseBOrchestrator on the same RunRecord.current_state.
+    BUILT = "built"
+    INTEGRATION_TESTED = "integration_tested"
+    COVERAGE_CHECKED = "coverage_checked"
+    CONTAINER_BUILT = "container_built"
+    SBOM_GENERATED = "sbom_generated"
+    IMAGE_SCANNED = "image_scanned"
+    SIGNED = "signed"
+    PUBLISHED = "published"
+    EVIDENCE_RECORDED = "evidence_recorded"
     FAILED = "failed"
     ERROR = "error"
 
@@ -42,10 +54,16 @@ class InvalidRunTransitionError(Exception):
         super().__init__(f"invalid run state transition: {current_name!r} -> {target.value!r}")
 
 
-# Terminal states: no outgoing transitions.
+# Terminal states: no outgoing transitions. (Phase B's success terminal is
+# EVIDENCE_RECORDED; MERGE_DECISION_PUBLISHED remains terminal *for Phase A* —
+# its only outgoing edge, to BUILT, is exercised exclusively by the Phase B
+# orchestrator on an APPROVED merge decision.)
 TERMINAL_RUN_STATES: frozenset[RunState] = frozenset(
     {RunState.MERGE_DECISION_PUBLISHED, RunState.FAILED, RunState.ERROR}
 )
+
+# Phase B terminal/success states (Batch 7).
+PHASE_B_SUCCESS_STATE: RunState = RunState.EVIDENCE_RECORDED
 
 # Allowed state adjacency. The orchestrator maps observer stage outcomes and
 # control-plane events onto these transitions; anything not listed here raises
@@ -92,7 +110,23 @@ ALLOWED_RUN_TRANSITIONS: dict[RunState | None, frozenset[RunState]] = {
     ),
     RunState.APPROVED: frozenset({RunState.MERGE_DECISION_PUBLISHED, RunState.ERROR}),
     RunState.REJECTED: frozenset({RunState.MERGE_DECISION_PUBLISHED, RunState.ERROR}),
-    RunState.MERGE_DECISION_PUBLISHED: frozenset(),
+    # Batch 7: an APPROVED Phase A merge decision is the ONLY gateway into
+    # Phase B (Section 5.2). No other state may enter BUILT — a failed or
+    # rejected Phase A can never reach the supply-chain flow (tested).
+    RunState.MERGE_DECISION_PUBLISHED: frozenset({RunState.BUILT}),
+    RunState.BUILT: frozenset({RunState.INTEGRATION_TESTED, RunState.FAILED, RunState.ERROR}),
+    RunState.INTEGRATION_TESTED: frozenset(
+        {RunState.COVERAGE_CHECKED, RunState.FAILED, RunState.ERROR}
+    ),
+    RunState.COVERAGE_CHECKED: frozenset(
+        {RunState.CONTAINER_BUILT, RunState.FAILED, RunState.ERROR}
+    ),
+    RunState.CONTAINER_BUILT: frozenset({RunState.SBOM_GENERATED, RunState.FAILED, RunState.ERROR}),
+    RunState.SBOM_GENERATED: frozenset({RunState.IMAGE_SCANNED, RunState.FAILED, RunState.ERROR}),
+    RunState.IMAGE_SCANNED: frozenset({RunState.SIGNED, RunState.FAILED, RunState.ERROR}),
+    RunState.SIGNED: frozenset({RunState.PUBLISHED, RunState.FAILED, RunState.ERROR}),
+    RunState.PUBLISHED: frozenset({RunState.EVIDENCE_RECORDED, RunState.ERROR}),
+    RunState.EVIDENCE_RECORDED: frozenset(),
     RunState.FAILED: frozenset(),
     RunState.ERROR: frozenset(),
 }
@@ -106,6 +140,7 @@ def assert_run_transition(current: RunState | None, target: RunState) -> None:
 
 __all__ = [
     "ALLOWED_RUN_TRANSITIONS",
+    "PHASE_B_SUCCESS_STATE",
     "TERMINAL_RUN_STATES",
     "InvalidRunTransitionError",
     "RunState",

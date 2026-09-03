@@ -46,7 +46,19 @@ def test_unknown_bandit_severity_raises_not_defaults() -> None:
 
 def test_unknown_tool_raises() -> None:
     with pytest.raises(UnknownSeverityError, match="no severity map registered"):
-        map_severity("trivy", "HIGH")  # trivy map is Batch 7 scope
+        map_severity("totally-unknown-scanner", "HIGH")
+
+
+def test_trivy_severity_map() -> None:
+    """Batch 7: Trivy CVSS vocabulary is 1:1; UNKNOWN -> MEDIUM (documented)."""
+    assert map_severity("trivy", "HIGH") is Severity.HIGH
+    assert map_severity("trivy", "CRITICAL") is Severity.CRITICAL
+    assert map_severity("trivy", "MEDIUM") is Severity.MEDIUM
+    assert map_severity("trivy", "LOW") is Severity.LOW
+    # Non-1:1 documented default: unscorable published vulnerability.
+    assert map_severity("trivy", "UNKNOWN") is Severity.MEDIUM
+    with pytest.raises(UnknownSeverityError):
+        map_severity("trivy", "BLOCKER")
 
 
 def test_gitleaks_all_findings_are_critical() -> None:

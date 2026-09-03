@@ -86,6 +86,26 @@ class Planner:
         steps: list[ResolvedStep] = []
         for stage in ordered_stages:
             entry = entries[stage.id]
+
+            # Batch 7 (Section 6 — Build family): the container_build stage's
+            # declared Dockerfile base image MUST be allowlisted by build
+            # policy — enforced HERE at planning time, before any compile or
+            # dispatch. A missing declaration fails closed too: building a
+            # container whose base image policy has never seen is exactly the
+            # "unvetted artifact enters the supply chain" threat.
+            if stage.id == "container_build":
+                base_image = (stage.base_image or "").strip()
+                if not base_image:
+                    unapproved.append(
+                        "container_build stage has no declared base_image "
+                        "(Section 5.2: builds may only use allowlisted bases)"
+                    )
+                elif base_image not in self._policy.build_policy.allowed_base_images:
+                    unapproved.append(
+                        f"base image {base_image!r} is not allowlisted "
+                        f"(stage {stage.id!r}; build_policy.allowed_base_images)"
+                    )
+
             tool_name = str(entry["tool_name"])
             tool_version = str(entry["tool_version"])
             if not tool_name.startswith(GATE_TOOL_PREFIX):

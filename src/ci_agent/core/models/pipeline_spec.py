@@ -53,6 +53,11 @@ class StageDefinition(BaseModel):
     name: str
     depends_on: list[str] = Field(default_factory=list)
     required_tools: list[str] = Field(default_factory=list)
+    # Batch 7 (Section 5.2/6 — Build family): the Dockerfile base image the
+    # container_build stage builds FROM, DECLARED in the spec and enforced by
+    # the Planner against build_policy.allowed_base_images (hard fail on a
+    # non-allowlisted image — a real enforced check, never documentation).
+    base_image: str | None = None
 
 
 class PipelineSpec(BaseModel):

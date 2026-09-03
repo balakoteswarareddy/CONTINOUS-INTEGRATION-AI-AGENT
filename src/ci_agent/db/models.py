@@ -68,6 +68,11 @@ class RunRecord(Base):
     dispatch_branch: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # GitHub's workflow run id once resolved after workflow_dispatch.
     external_run_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # --- Batch 7 additions (Phase B supply-chain waves) ----------------------
+    # The SECOND workflow run (Phase B) dispatched to the same branch after an
+    # approved Phase A merge decision; evidence downloads use these coords.
+    phase_b_branch: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    phase_b_external_run_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # --- Batch 5 addition: explicit pipeline state (Report Section 10) -------
     # Value drawn from ci_agent.orchestrator.run_state.RunState; the control
     # plane's authoritative pipeline position, dual-written with the audit log.
@@ -98,6 +103,16 @@ _RUN_STATE_TO_STATUS: dict[str, str] = {
     "merge_decision_published": "published",
     "failed": "failed",
     "error": "error",
+    # --- Phase B (Batch 7, Section 5.2) -------------------------------------
+    "built": "in_progress",
+    "integration_tested": "in_progress",
+    "coverage_checked": "in_progress",
+    "container_built": "in_progress",
+    "sbom_generated": "in_progress",
+    "image_scanned": "in_progress",
+    "signed": "in_progress",
+    "published": "in_progress",
+    "evidence_recorded": "succeeded",
 }
 
 
@@ -230,6 +245,9 @@ class PolicyDecisionRecord(Base):
     policy_family: Mapped[str | None] = mapped_column(String(64), nullable=True)
     policy_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
     reasons_json: Mapped[str] = mapped_column(Text, default="[]")
+    # Batch 7: JSON array of exception ids that waived this decision
+    # (Section 9 — exception/waiver ID must be visible in policy evidence).
+    exception_ids_json: Mapped[str | None] = mapped_column(Text(), nullable=True)
     evaluated_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow)
 
 
@@ -293,4 +311,126 @@ class FindingRecord(Base):
         return (
             f"<FindingRecord run_id={self.run_id!r} scanner={self.scanner!r} "
             f"rule_id={self.rule_id!r} severity={self.severity!r}>"
+        )
+
+
+class ArtifactRecord(Base):
+    """One built artifact of a run, identified by its immutable digest.
+
+    Batch 7 (Report Section 8 — "Use immutable digest as the primary
+    identity; do not treat tags alone as integrity evidence"). Rows are
+    written ONLY by :class:`ci_agent.supplychain.sbom_service.SBOMService`
+    from build output that carries a registry/computed digest — a mutable
+    tag is never accepted as identity (tested).
+
+    ``sbom_ref``/``signature_ref`` are pointers into the evidence store (not
+    blobs); they fill in as the SBOM/signing stages complete.
+    """
+
+    __tablename__ = "artifact_records"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(String(64), ForeignKey("run_records.run_id"), index=True)
+    # sha256:<64 hex> — unique across the registry (immutable identity).
+    digest: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    # Registry HOST ("ghcr.io") — attribute renamed (registry_host) because
+    # `registry` collides with SQLAlchemy's DeclarativeBase.registry.
+    registry_host: Mapped[str] = mapped_column("registry", String(512))
+    sbom_ref: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    signature_ref: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow)
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return f"<ArtifactRecord run_id={self.run_id!r} digest={self.digest!r}>"
+
+
+class ExceptionRecord(Base):
+    """A governed security exception/waiver (Batch 7; Sections 6 and 18).
+
+    Rows are written ONLY by
+    :meth:`ci_agent.exceptions.exception_service.ExceptionService.grant_exception`
+    — the PDP, Planner and orchestrators have NO code path that can create or
+    auto-apply an exception (Section 7.3 "Policy bypass" threat; inspection-
+    tested). ``expires_at`` is NOT NULL: a permanent exception can never be
+    created (Section 18 — non-negotiable).
+    """
+
+    __tablename__ = "exception_records"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    project_id: Mapped[str] = mapped_column(String(255), index=True)
+    # Policy family this exception covers (e.g. security_policy) + the rule
+    # it waives. rule_id "*" (or NULL) = every rule of the family.
+    policy_family: Mapped[str] = mapped_column(String(64), index=True)
+    rule_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    reason: Mapped[str] = mapped_column(Text())
+    granted_by: Mapped[str] = mapped_column(String(255))
+    granted_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow)
+    # REQUIRED (Section 18: "exceptions ... have expiration times"). No
+    # default: a grant without an explicit expiry is rejected by the service
+    # and the column is non-nullable at the DB level.
+    expires_at: Mapped[datetime] = mapped_column(DateTime(), nullable=False)
+    # active / revoked / expired (expired is a derived state enforced by
+    # comparison against the clock at read time; the cleanup job only flips
+    # the stored status for hygiene).
+    status: Mapped[str] = mapped_column(String(16), default="active")
+    revoked_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow)
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return (
+            f"<ExceptionRecord id={self.id!r} project_id={self.project_id!r} "
+            f"policy_family={self.policy_family!r} expires_at={self.expires_at!r}>"
+        )
+
+
+class SignatureRecordRow(Base):
+    """A recorded signature reference (Batch 7; Section 8 signature row).
+
+    Written ONLY by the SigningService. Key material NEVER reaches this
+    table — references and an integrity hash of the signature file only
+    (tested). ``artifact_digest`` is the immutable identity; the mutable
+    publish tag is not recorded here at all.
+    """
+
+    __tablename__ = "signature_records"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(String(64), ForeignKey("run_records.run_id"), index=True)
+    artifact_digest: Mapped[str] = mapped_column(String(128), index=True)
+    signature_ref: Mapped[str] = mapped_column(Text())
+    bundle_ref: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    # True = keyless OIDC signing (Section 7.2 preference).
+    keyless: Mapped[bool] = mapped_column(default=False)
+    signature_sha256: Mapped[str] = mapped_column(String(64))
+    signed_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow)
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return f"<SignatureRecordRow digest={self.artifact_digest!r} ref={self.signature_ref!r}>"
+
+
+class ProvenanceRecordRow(Base):
+    """A recorded in-toto/SLSA provenance attestation (Batch 7; Section 8).
+
+    The subject digest was verified to EQUAL the artifact digest at record
+    time (tamper detection, tested). The attestation itself lives in the
+    evidence store; this row keeps the pointer + content hash.
+    """
+
+    __tablename__ = "provenance_records"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(String(64), ForeignKey("run_records.run_id"), index=True)
+    artifact_digest: Mapped[str] = mapped_column(String(128), index=True)
+    attestation_ref: Mapped[str] = mapped_column(Text())
+    predicate_type: Mapped[str] = mapped_column(String(255))
+    attestation_sha256: Mapped[str] = mapped_column(String(64))
+    subject_digest: Mapped[str] = mapped_column(String(128))
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow)
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return (
+            f"<ProvenanceRecordRow digest={self.artifact_digest!r} "
+            f"predicate={self.predicate_type!r}>"
         )

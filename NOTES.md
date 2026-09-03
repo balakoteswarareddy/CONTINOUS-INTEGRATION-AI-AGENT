@@ -673,3 +673,114 @@ CRITICAL severity/rule id.
 `eslint-report.json` and the parser is registered, but the eslint upload is
 wired to the `format_lint` stage generically — if a future nodejs template
 splits lint/sast stages, revisit `REPORT_UPLOAD_STAGES` mapping (cosmetic).
+
+---
+
+# Batch 7 Notes — Phase B Supply Chain (build → SBOM → scan → sign → publish)
+
+Completes Section 13 "Phase 2 — Security Supply Chain": the Section 5.2
+nine-stage flow (full_build, integration_tests, coverage_gate, container_build,
+sbom_generate, image_scan, sign_attest, publish, record_evidence) plus the
+Section 6/18 exception/waiver workflow.
+
+## Decisions requiring documentation
+
+1. **SBOM format: BOTH SPDX and CycloneDX supported** (Section 8 "an approved
+   format such as SPDX or CycloneDX" + Section 12 vendor neutrality — a SBOM
+   adapter, not a format mandate). `SBOMService.parse_syft_output` detects the
+   document family (`spdxVersion` vs `bomFormat`) and records `format` +
+   `component_count`. The GOVERNED default (`artifact_policy.yaml
+   sbom_format: spdx`) drives the compiled syft template
+   (`-o spdx-json=sbom.json`), and a NEW artifact_policy.rego rule fails an
+   artifact whose SBOM exists but is in the WRONG format (fires only when
+   has_sbom is true; the missing-SBOM rule already covers absence).
+2. **Signing: keyless preferred, test-key fallback in dev/test.** Section 7.2
+   prefers KMS/HSM or keyless (OIDC) signing; keyless requires a cluster OIDC
+   bridge this environment does not have, so the compiled sign command uses a
+   runner-environment key (`cosign sign --key env://COSIGN_KEY ...`).
+   **HARDENING ITEM (flagged):** switch to keyless OIDC (or KMS) before
+   production; `--insecure-ignore-tlog` in the verify wrapper is likewise a
+   dev/test posture. The agent NEVER touches key material: the key reference
+   lives only in runner env; the parser REFUSES to record any output
+   containing key markers (tested); SignatureRecord/ProvenanceRecord rows
+   carry references + integrity hashes only (grep-style test asserts
+   `-----BEGIN` never persists).
+3. **Artifact identity = immutable digest, NEVER a tag** (Section 8; tested
+   directly): `compute_artifact_digest` accepts only `sha256:<64hex>` from
+   real build output (`docker inspect --format '{{.Id}}'`, captured by the
+   compiled container.build command into image-digest.txt); a tag-shaped
+   input raises `TagOnlyDigestError` before any write.
+4. **EvidenceModel.artifacts / .attestations are no longer permanently empty
+   (confirmation).** `ArtifactRecord` (digest, registry host, sbom_ref,
+   signature_ref), `SignatureRecordRow` and `ProvenanceRecordRow` (migration
+   0005) feed `EvidenceModel.artifacts` / `.attestations`; verified end-to-end
+   by the mocked Phase A→B run asserting the compliance view carries the real
+   digest, SBOM pointer, signature pointer and both attestation kinds.
+5. **Publish is dispatched in TWO waves** (Section 5.2 Stage 8 "Push only
+   after required gates pass"): wave 1 = build…sign_attest; the control plane
+   then evaluates `publish_gate` (security_policy + artifact_policy, live
+   OPA) on REAL facts — parsed Trivy findings + artifact facts where
+   `has_signature` reflects a REAL verification result, not a claim. Only a
+   PASS/WAIVED dispatches wave 2 (publish + record_evidence) — the push job
+   physically does not exist until the gate passes.
+6. **Base-image enforcement is a real Planner check** (not documentation):
+   `StageDefinition.base_image` (new optional field) declares the Dockerfile
+   base; an undeclared or non-allowlisted base raises `UnapprovedToolError`
+   at planning time (reusing Batch 3's exception type per the batch spec).
+   The new Phase B job images (docker:27.3.1-cli, syft, trivy, cosign) were
+   added to the governed build/tool policies; deny-by-default is unchanged.
+7. **Registry allowlist scope = registry HOST.** Artifact facts record the
+   host portion ("ghcr.io") of the spec's artifact destination so the rego's
+   exact-match allowlist behaves correctly; the compiled publish command
+   pushes to `$CI_AGENT_PUBLISH_REF`, a repo CONFIGURATION variable injected
+   as a name binding — never a secret (the compiler HARD-FAILS if the
+   generated YAML references the secrets context; tested).
+8. **Coverage convention extended (Batch 4's ci-agent-results.json):** rows
+   may carry `coverage_percent`; `PhaseBOrchestrator` compares it with
+   `PipelineSpec.thresholds["coverage_percent"]` (the Batch 1 field, now
+   wired) — fail-closed when the data is missing but a threshold exists.
+9. **Exception storage = DB table** (Task D allowed file or DB): `exception_
+   records` (migration 0005), because exceptions must be read
+   transactionally by the PDP and audited like all control-plane state;
+   `governance/catalog/policies/exceptions/README.md` records the decision
+   and `governance/schemas/exception_record.schema.json` governs the
+   serialized form. `expires_at` is NOT NULL (Section 18 non-negotiable);
+   expiry is derived from the clock at read time (no cleanup job needed for
+   correctness — `expire_due_exceptions` is hygiene only).
+10. **PDP waiver semantics (conservative):** a FAIL becomes WAIVED only when
+    EVERY failed family is covered; for security_policy every failing rule
+    must be covered (rule-scoped exceptions cover exactly their rule;
+    wildcards cover the family). A partial waiver still FAILS. Waived
+    decisions record exception ids in the audit event AND
+    `policy_decision_records.exception_ids_json`, and the compliance view
+    surfaces `exception_ids` per decision (Section 9: waiver ID/approver
+    visible, never collapsed into a pass). No write path exists outside
+    `ExceptionService.grant_exception` — enforced by an inspection test
+    (Section 7.3 "Policy bypass").
+11. **Trivy severity map** (documented non-1:1): CRITICAL/HIGH/MEDIUM/LOW
+    1:1; UNKNOWN → MEDIUM (same rationale as pip-audit's unscorable
+    published vulnerabilities).
+12. **Phase B trigger:** Phase A's approved merge decision is the ONLY
+    gateway (`RunState.MERGE_DECISION_PUBLISHED → BUILT`); Phase A calls the
+    wired `on_phase_a_approved` callback, and `PhaseBOrchestrator.start`
+    re-verifies BOTH the run state AND the audited `approved` flag — a
+    failed/rejected Phase A can never start Phase B (tested directly).
+    A Phase B start failure after publication is audited
+    (`phase_b_start_failed`) without corrupting the published Phase A
+    decision; `PhaseBOrchestrator.start` can re-drive it.
+
+## Batch 7 gate results
+
+- Full suite: **558 passed, 1 skipped** (live-credential dispatch; OPA live).
+- ruff / black / mypy clean; governance validation 11/11; Alembic 0005
+  up/down/up verified.
+- DoD evidence: mocked Phase A→B run populates the compliance report with
+  real artifact/SBOM/signature data; the exception demonstration prints
+  fail → waived(id) → fail-again; base-image, signing-required-but-
+  unverifiable and image-vulnerability scenarios all demonstrably block
+  publish (live OPA).
+
+**Flagged for later batches:** keyless signing (see 2); admin API authn is
+still MVP-grade X-Admin-Key (Batch 5 caveat unchanged); `artifact_registry_
+client.push` exists for control-plane-driven environments but the compiled
+publish job is the normal push path.

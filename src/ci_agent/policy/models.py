@@ -36,6 +36,10 @@ class PolicyInputFacts(BaseModel):
     # {model_provider, data_classification, human_override} when an AI model
     # invocation is under evaluation; None means no AI model is involved.
     ai_invocation: dict[str, Any] | None = None
+    # Batch 7: supply-chain artifacts under evaluation at the publish gate —
+    # [{digest, registry, has_sbom, has_signature, sbom_format}, ...]. Consumed
+    # by artifact_policy.rego via input.runtime.artifacts.
+    artifacts: list[dict[str, Any]] = Field(default_factory=list)
     run_id: str | None = None
 
 
@@ -48,4 +52,9 @@ class PolicyDecisionResult(BaseModel):
     reasons: list[str] = Field(default_factory=list)
     policy_family: str
     policy_version: str
+    # Batch 7 (Task D): ids of the governed exceptions that waived this
+    # decision (empty unless decision == WAIVED). Recorded on the
+    # PolicyDecisionRecord + audit event so Section 9's "exception/waiver ID
+    # and approver" is visible in policy evidence.
+    exception_ids: list[str] = Field(default_factory=list)
     evaluated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

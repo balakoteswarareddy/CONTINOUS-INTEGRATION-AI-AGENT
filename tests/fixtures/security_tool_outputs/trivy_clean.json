@@ -1,0 +1,21 @@
+{
+  "SchemaVersion": 2,
+  "CreatedAt": "2026-09-03T10:00:00Z",
+  "ArtifactName": "ci-agent/app:ci",
+  "ArtifactType": "container_image",
+  "Metadata": {"OS": {"Family": "debian", "Name": "12.2"}, "ImageID": "sha256:1111111111111111111111111111111111111111111111111111111111111111"},
+  "Results": [
+    {
+      "Target": "ci-agent/app:ci (debian 12.2)",
+      "Class": "os-pkgs",
+      "Type": "debian",
+      "Vulnerabilities": null
+    },
+    {
+      "Target": "Python",
+      "Class": "lang-pkgs",
+      "Type": "pip",
+      "Vulnerabilities": []
+    }
+  ]
+}
