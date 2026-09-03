@@ -1,0 +1,19 @@
+{
+  "dependencies": [
+    {"name": "requests", "version": "2.31.0", "vulns": [], "skips": []},
+    {
+      "name": "flask",
+      "version": "2.0.1",
+      "vulns": [
+        {
+          "id": "GHSA-hx2x-85gr-9gqq",
+          "fix_versions": ["2.3.2"],
+          "aliases": ["CVE-2023-30861"],
+          "description": "Flask 2.2.x and 2.3.x before 2.3.2 are vulnerable to cookie disclosure via Vary header omission."
+        }
+      ],
+      "skips": []
+    }
+  ],
+  "fixes": []
+}

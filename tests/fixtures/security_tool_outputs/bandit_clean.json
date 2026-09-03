@@ -1,0 +1,8 @@
+{
+  "errors": [],
+  "generated_at": "2026-09-03T10:00:00Z",
+  "results": [],
+  "metrics": {
+    "_totals": {"loc": 1200, "SEV_HIGH": 0, "SEV_MEDIUM": 0, "SEV_LOW": 0}
+  }
+}

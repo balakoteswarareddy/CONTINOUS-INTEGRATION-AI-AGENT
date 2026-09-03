@@ -21,13 +21,11 @@ from ci_agent.core.models.evidence_model import (
 from ci_agent.core.models.evidence_model import EvidenceModel, Finding
 from ci_agent.db.models import (
     ApprovalRecord,
+    FindingRecord,
     PolicyDecisionRecord,
     RunRecord,
     StageExecutionRecord,
 )
-
-# Exit-code-only findings (MVP): a failed tool stage becomes one HIGH finding.
-EXIT_CODE_FINDING_SEVERITY = Severity.HIGH
 
 
 class RunNotFoundError(LookupError):
@@ -69,17 +67,27 @@ class EvidenceAssembler:
             .all()
         )
 
-        # Exit-code-only findings for failed stages (Batch 6 adds real parsing).
+        # REAL parsed findings (Batch 6): from FindingRecord rows — the
+        # exit-code-only HIGH placeholder is fully removed.
+        finding_rows = (
+            self._session_factory()
+            .execute(
+                select(FindingRecord)
+                .where(FindingRecord.run_id == run_id)
+                .order_by(FindingRecord.id)
+            )
+            .scalars()
+            .all()
+        )
         findings = [
             Finding(
-                severity=EXIT_CODE_FINDING_SEVERITY,
-                scanner=record.stage_id,
-                rule_id="stage_exit_code_nonzero",
-                component=record.stage_id,
-                disposition="open",
+                severity=Severity(row.severity),
+                scanner=row.scanner,
+                rule_id=row.rule_id,
+                component=row.component,
+                disposition=row.disposition,
             )
-            for record in stage_records
-            if record.status == "failed"
+            for row in finding_rows
         ]
 
         approvals = [
@@ -143,6 +151,49 @@ class EvidenceAssembler:
             .scalars()
             .all()
         )
+
+    def finding_records(self, run_id: str) -> list[FindingRecord]:
+        """Persisted normalized findings for the run (Batch 6)."""
+        return list(
+            self._session_factory()
+            .execute(
+                select(FindingRecord)
+                .where(FindingRecord.run_id == run_id)
+                .order_by(FindingRecord.id)
+            )
+            .scalars()
+            .all()
+        )
+
+    def findings_summary(self, run_id: str) -> dict[Severity, int]:
+        """Findings count per governed severity (report view summary)."""
+        counter: dict[Severity, int] = {}
+        for row in self.finding_records(run_id):
+            severity = Severity(row.severity)
+            counter[severity] = counter.get(severity, 0) + 1
+        return counter
+
+    def security_evidence_warnings(self, run_id: str) -> list[dict[str, object]]:
+        """Parser-warning incidents for the run (fail-closed visibility)."""
+        warnings: list[dict[str, object]] = []
+        with self._session_factory() as session:
+            rows = (
+                session.execute(
+                    select(StageExecutionRecord).where(
+                        StageExecutionRecord.run_id == run_id,
+                        StageExecutionRecord.findings_ref.is_not(None),
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        for row in rows:
+            if not row.findings_ref:
+                continue
+            summary = json.loads(row.findings_ref)
+            if summary.get("parser_warnings"):
+                warnings.append({"stage_id": row.stage_id, "warnings": summary["parser_warnings"]})
+        return warnings
 
     def approval_records(self, run_id: str) -> list[ApprovalRecord]:
         """Persisted approval rows for the run, oldest first."""

@@ -22,7 +22,7 @@ class TestAllowList:
         assert registry.get_command("sast.bandit") == "bandit -r . -f json -o bandit-report.json"
         assert registry.get_command("tests.pytest") == "pytest --junitxml=results.xml"
         assert registry.get_command("scan.gitleaks").startswith("gitleaks detect")
-        assert registry.get_command("scan.pip-audit") == "pip-audit -f json"
+        assert registry.get_command("scan.pip-audit") == "pip-audit -f json > pip-audit-report.json"
 
     def test_native_checkout_maps_to_none(self, registry: CommandTemplateRegistry) -> None:
         # checkout.default is handled natively by actions/checkout, not shell.

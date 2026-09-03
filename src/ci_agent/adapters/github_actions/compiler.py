@@ -41,6 +41,32 @@ GATE_TOOL_PREFIX = "internal."
 JOB_ID_PREFIX = "stage-"
 SUMMARY_JOB_ID = "ci-agent-results"
 
+# Batch 6: scan stages upload their raw tool report so the control plane can
+# parse REAL findings (Security Evidence Service). Explicit table: stage_id ->
+# {report file: tool_name}; the compiler emits one upload-artifact step per
+# scan stage with artifact name ci-agent-scan-<stage_id>.
+SCAN_STAGE_REPORT_FILES: dict[str, dict[str, str]] = {
+    "sast": {"bandit-report.json": "bandit", "semgrep-report.json": "semgrep"},
+    "secret_scan": {"gitleaks-report.json": "gitleaks"},
+    "dependency_scan": {
+        "pip-audit-report.json": "pip-audit",
+        "npm-audit-report.json": "npm-audit",
+    },
+}
+
+# Stages whose raw report is uploaded (scan stages + lint's eslint JSON).
+REPORT_UPLOAD_STAGES: dict[str, dict[str, str]] = {
+    **SCAN_STAGE_REPORT_FILES,
+    "format_lint": {"eslint-report.json": "eslint"},
+}
+
+SCAN_ARTIFACT_NAME_PREFIX = "ci-agent-scan-"
+
+
+def scan_artifact_name(stage_id: str) -> str:
+    return f"{SCAN_ARTIFACT_NAME_PREFIX}{stage_id}"
+
+
 # GitHub job result values (needs.<job>.result) -> our StageStatus vocabulary.
 # Explicit, reviewable mapping table — not inferred at runtime (batch DoD).
 GITHUB_JOB_RESULT_TO_STAGE_STATUS: dict[str, str] = {
@@ -115,6 +141,22 @@ def _stage_job(step: Any, command: str | None, needs: list[str]) -> dict[str, An
         )
     else:
         job["steps"].append(_tool_step(command or "", stage_id, step.tool_name))
+    if stage_id in REPORT_UPLOAD_STAGES:
+        # Upload the raw report for control-plane parsing (Batch 6). if/always
+        # so a FAILING scan still uploads its findings for fail-closed review.
+        report_paths = " ".join(REPORT_UPLOAD_STAGES[stage_id])
+        job["steps"].append(
+            {
+                "name": f"upload scan report [{stage_id}]",
+                "if": "always()",
+                "uses": UPLOAD_ARTIFACT_ACTION,
+                "with": {
+                    "name": scan_artifact_name(stage_id),
+                    "path": report_paths,
+                    "if-no-files-found": "ignore",
+                },
+            }
+        )
     return job
 
 

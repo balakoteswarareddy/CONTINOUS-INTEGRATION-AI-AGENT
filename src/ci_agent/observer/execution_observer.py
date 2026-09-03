@@ -9,6 +9,7 @@ every write appends a ``stage_transition`` AuditStore event.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
@@ -81,11 +82,22 @@ class InvalidStageTransitionError(Exception):
 
 
 class ExecutionObserver:
-    """Records stage transitions durably and monotonically, with audit."""
+    """Records stage transitions durably and monotonically, with audit.
+
+    Batch 6: ``scan_evidence_collector`` is an optional callable wired in
+    create_app (the Security Evidence Service fetcher). When a scan-type
+    stage (sast / secret_scan / dependency_scan) is about to reach a terminal
+    status, the collector runs BEFORE the row is written terminal — real
+    findings must exist before any policy gate that depends on them.
+    """
+
+    SCAN_STAGE_IDS: frozenset[str] = frozenset({"sast", "secret_scan", "dependency_scan"})
 
     def __init__(self, session_factory: sessionmaker[Session], audit_store: AuditStore) -> None:
         self._session_factory = session_factory
         self._audit_store = audit_store
+        # Callable(run_id, stage_id) -> None; set by create_app (Batch 6).
+        self.scan_evidence_collector: Callable[..., object] | None = None
 
     def record_stage_transition(
         self,
@@ -111,6 +123,18 @@ class ExecutionObserver:
             status.value if isinstance(status, StageStatus) else StageStatus(status).value
         )
         current_status, record = self._load(run_id, stage_id)
+
+        # Batch 6: collect scan findings BEFORE the stage lands terminal so
+        # the policy gate never runs against missing evidence. A collector
+        # error FAILS the transition loudly (fail-closed) rather than marking
+        # the stage terminal with unparsed/unparsed-able tool output.
+        if (
+            status_value in {s.value for s in TERMINAL_STAGE_STATUSES}
+            and stage_id in self.SCAN_STAGE_IDS
+            and self.scan_evidence_collector is not None
+            and (record is None or current_status != status_value)
+        ):
+            self.scan_evidence_collector(run_id, stage_id)
 
         changed = False
         if record is None:

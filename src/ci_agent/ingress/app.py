@@ -22,11 +22,14 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 
+from ci_agent.adapters.base import DispatchRef
 from ci_agent.adapters.github_actions.adapter import GitHubActionsAdapter
 from ci_agent.adapters.github_actions.client import GitHubAuthConfig, GitHubClient
+from ci_agent.adapters.github_actions.compiler import REPORT_UPLOAD_STAGES
 from ci_agent.audit.audit_store import AuditStore
 from ci_agent.config.settings import Settings, get_settings
 from ci_agent.db.base import Base, create_engine, get_session_factory
+from ci_agent.db.models import RunRecord
 from ci_agent.governance import (
     load_identity_policy,
     load_intake_schema,
@@ -48,6 +51,7 @@ from ci_agent.reliability.circuit_breaker import CircuitBreaker
 from ci_agent.reliability.concurrency_guard import ConcurrencyGuard
 from ci_agent.reporting.evidence_assembler import EvidenceAssembler
 from ci_agent.reporting.report_api import router as report_api_router
+from ci_agent.security.security_evidence_service import SecurityEvidenceService
 
 LOGGER = logging.getLogger("ci_agent.ingress")
 
@@ -129,6 +133,58 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     observer_events.on_stage_transition = orchestrator.on_stage_transition
     evidence_assembler = EvidenceAssembler(session_factory, audit_store)
 
+    # --- Batch 6: real security findings pipeline ----------------------------
+    security_evidence = SecurityEvidenceService(session_factory, audit_store)
+    gha_adapter = GitHubActionsAdapter(github_client)
+
+    def _collect_scan_evidence(run_id: str, stage_id: str) -> None:
+        """Fetch a scan stage's raw report artifact and collect findings.
+
+        Called by the observer BEFORE a scan stage is marked terminal (so the
+        policy gate never runs without evidence). The RunRecord must already
+        carry dispatch coordinates (the orchestrator sets them at dispatch).
+        Missing artifact / parse failure => ParserWarning flagged by the
+        service; the PDP then fails closed on the flagged condition.
+        """
+        with session_factory() as session:
+            run = session.get(RunRecord, run_id)
+            if run is None or not run.dispatch_branch or not run.external_run_id:
+                return  # nothing dispatched yet; nothing to fetch
+            dispatch_ref = DispatchRef(
+                run_id=run_id,
+                repository=run.repository,
+                branch=run.dispatch_branch,
+                external_run_id=run.external_run_id,
+            )
+        tool_by_file = REPORT_UPLOAD_STAGES.get(stage_id, {})
+        try:
+            contents = gha_adapter.download_stage_scan_artifact(dispatch_ref, stage_id)
+        except Exception as exc:
+            # Download failure (auth, transport, rate limit): record a
+            # ParserWarning incident so the policy gate fails closed instead
+            # of silently treating the stage as clean. Never raise past the
+            # observer — the anomaly is captured as evidence.
+            LOGGER.warning(
+                "scan artifact download failed for run=%s stage=%s: %s",
+                run_id,
+                stage_id,
+                exc,
+            )
+            security_evidence.collect_findings(
+                run_id, stage_id, next(iter(tool_by_file.values()), stage_id), ""
+            )
+            return
+        if not contents:
+            # Artifact absent: flagged as an incident (not a clean scan).
+            security_evidence.collect_findings(
+                run_id, stage_id, next(iter(tool_by_file.values()), stage_id), ""
+            )
+            return
+        for filename, tool in tool_by_file.items():
+            security_evidence.collect_findings(run_id, stage_id, tool, contents.get(filename, ""))
+
+    observer.scan_evidence_collector = _collect_scan_evidence
+
     # Breakers guard the two external dependencies (Section 11). Open OPA
     # breaker -> OPAUnavailableError -> documented PDP fail-closed behaviour.
     opa_breaker = CircuitBreaker("opa", failure_threshold=5, recovery_timeout_seconds=30.0)
@@ -164,6 +220,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.state.pdp = pdp
     application.state.orchestrator = orchestrator
     application.state.evidence_assembler = evidence_assembler
+    application.state.security_evidence = security_evidence
     application.state.opa_breaker = opa_breaker
     application.state.github_breaker = github_breaker
     application.state.concurrency_guard = concurrency_guard

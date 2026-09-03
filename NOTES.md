@@ -570,3 +570,106 @@ generated-column complexity, existing rows/tests unaffected.
   live) — all prior batches still green.
 - `ruff check .` clean; `black --check` clean; `mypy` clean;
   `scripts/validate_governance.py` 11/11 + deny-by-default guard PASS.
+
+---
+
+# Batch 6 Notes — Security Evidence Service (SAST/SCA/Secrets finding parsing)
+
+Resequencing acknowledged: container scanning + SBOM/signing moved to Batch 7
+(they need a built artifact). This batch = the Phase-A-native portion of the
+original Stage 14. No container scanning, no SBOM here.
+
+## Severity mapping decisions (explicit, no silent defaults)
+
+1. **bandit**: 1:1 (HIGH/MEDIUM/LOW). Unknown words raise
+   `UnknownSeverityError` — a changed tool format must never silently become
+   "clean" or a guessed severity.
+2. **gitleaks**: the JSON report has NO native severity. EVERY finding maps
+   to CRITICAL (Section 5.1 Stage 7: secrets are incidents, not lint). A
+   hardwired constant, documented in `gitleaks_severity()`.
+3. **pip-audit**: real output carries no severity. With an enriched
+   `cvss_score` we band CVSS-style (>=9 critical, >=7 high, >=4 medium, else
+   low); unknown -> MEDIUM (documented default: an unscorable published
+   vulnerability is worth tracking, never ignorable).
+4. **npm-audit**: 1:1 over npm's vocabulary (critical/high/moderate/low/info;
+   moderate -> MEDIUM).
+5. **semgrep** (registered; nodejs sast stage): ERROR/WARNING/INFO ->
+   HIGH/MEDIUM/LOW (semgrep has no "critical").
+6. **eslint** (registered; nodejs lint stage): 2=error->HIGH, 1=warning->LOW
+   (lint qualities, not CVSS — documented).
+
+## Fixture shapes (sources)
+
+Real documented tool output shapes, captured as committed fixtures under
+`tests/fixtures/security_tool_outputs/` (clean + with-findings per tool):
+bandit `-f json` (`results[]` with issue_severity/test_id/filename/
+line_number); gitleaks `--report-format json` (array of {RuleID, File,
+StartLine, Secret, Match, ...}); pip-audit `-f json` (`dependencies[]` with
+`vulns[]` {id, fix_versions, aliases, description}); npm-audit `--json`
+(`vulnerabilities{}` keyed by package, `via[]` advisory objects vs. strings,
+`range`, npm>=9 shape).
+
+## Design decisions
+
+1. **"Couldn't parse" != "clean"** (batch requirement): parsers return
+   `ParseOutcome{findings, warnings}`; malformed/empty/shape-invalid output
+   yields warnings and is CLEAN=false. Missing `results[]`/`dependencies[]`/
+   `vulnerabilities{}` keys are also shape warnings, not empty scans.
+2. **Audit events carry COUNTS only** (`findings_collected`: {count,
+   by_severity, parser_warnings}) — never finding payloads (a leaked secret
+   must not enter the audit trail; tested).
+3. **`findings_ref` = per-stage summary blob** (`{"count": N, "by_severity":
+   {...}, "parser_warnings": [...]}`); `FindingRecord` rows are the detail
+   source of truth. No duplication of full rows (documented in the model).
+4. **Parser-warning incidents are AUDIT-backed** (not only the stage
+   summary): reconciliation can observe a stage terminal before its row
+   exists, so `parser_warnings()` reads the durable `findings_collected`
+   events — the fail-closed flag survives any event ordering.
+5. **Artifact download failure / absent artifact** in the app-level collector
+   is flagged as a parser-warning incident (empty output -> warning) instead
+   of raising past the observer: the anomaly becomes evidence and the gate
+   fails closed; the webhook stays resilient. `UnknownParserError` still
+   raises loudly.
+6. **Secret redaction is structural**: the gitleaks parser never reads
+   `Secret`/`Match` into the output model; a belt-and-braces assert re-checks
+   every emitted finding; the grep-style test sweeps FindingRecord rows,
+   audit payloads, and stage summaries for the fixture secret (PASSES).
+
+## Wiring
+
+- Compiler: scan/lint stages now upload their raw JSON reports
+  (`ci-agent-scan-<stage_id>` artifacts, `if: always()` so failing scans
+  still upload); `scan.pip-audit`, `scan.npm-audit`, `lint.eslint` commands
+  were extended to emit JSON report files.
+- Observer: `scan_evidence_collector` hook (wired in create_app) runs BEFORE
+  a scan stage is marked terminal — findings exist before any policy gate.
+- `_gate_facts` (orchestrator): findings now come from FindingRecord rows;
+  parser warnings become HIGH `parser_warning_unparseable_output` findings;
+  a FAILED scan stage with nothing persisted becomes HIGH
+  `scan_failed_without_parseable_findings`. Real severity counts flow into
+  `security_policy.rego` thresholds (verified against live OPA).
+- Reports: new `?view=security` (scanner, rule_id, severity, component,
+  location, disposition per finding + summary + warnings); the compliance
+  package and EvidenceModel now carry REAL findings.
+
+## MVP placeholder — fully removed (confirmation)
+
+The Batch 5 "one exit-code-only HIGH finding per failed stage" logic is GONE:
+`phase_a_orchestrator._gate_facts` (rewritten), `evidence_assembler`
+(now queries FindingRecord; `EXIT_CODE_FINDING_SEVERITY` constant deleted).
+Grep for `stage_exit_code_nonzero` returns only this NOTES entry. The old
+report test was rewritten to plant a REAL gitleaks finding and assert its
+CRITICAL severity/rule id.
+
+## Batch 6 gate results
+
+- Full suite: **478 passed, 1 skipped** (live-credential dispatch; OPA live).
+- ruff / black / mypy clean. Alembic 0004 up/down/up verified.
+- DoD mocked pipeline: bandit HIGH finding -> gate FAILS vs live OPA
+  ("severity high: 1 findings exceed threshold 0"); clean scan -> publishes;
+  unparseable output -> fails closed; security view shows real finding data.
+
+**Flagged for follow-up**: the nodejs `lint.eslint` command now emits
+`eslint-report.json` and the parser is registered, but the eslint upload is
+wired to the `format_lint` stage generically — if a future nodejs template
+splits lint/sast stages, revisit `REPORT_UPLOAD_STAGES` mapping (cosmetic).

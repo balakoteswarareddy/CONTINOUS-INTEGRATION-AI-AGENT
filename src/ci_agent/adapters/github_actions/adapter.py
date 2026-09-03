@@ -31,6 +31,7 @@ from ci_agent.adapters.github_actions.compiler import (
     RESULTS_ARTIFACT_NAME,
     WORKFLOW_FILE_NAME,
     compile_to_github_actions,
+    scan_artifact_name,
     stage_id_from_job_id,
 )
 from ci_agent.core.models.common import StageStatus
@@ -245,6 +246,38 @@ class GitHubActionsAdapter(RunnerAdapter):
         return response.text
 
     # --------------------------------------------------------------- results
+
+    def download_stage_scan_artifact(
+        self, dispatch_ref: DispatchRef, stage_id: str
+    ) -> dict[str, str]:
+        """Download a scan stage's raw report artifact (Batch 6).
+
+        Returns ``{filename: text}`` for every file in the
+        ``ci-agent-scan-<stage_id>`` artifact; empty dict when the artifact
+        does not exist (yet) — the caller treats that as a fail-closed
+        "no parseable output" incident, never as a clean scan.
+        """
+        if not dispatch_ref.external_run_id:
+            return {}
+        artifacts = self._client.list_artifacts(
+            dispatch_ref.repository, dispatch_ref.external_run_id
+        )
+        target = next(
+            (a for a in artifacts if a.get("name") == scan_artifact_name(stage_id)),
+            None,
+        )
+        if target is None:
+            return {}
+        blob = self._client.download_artifact(dispatch_ref.repository, str(target["id"]))
+        import io
+        import zipfile
+
+        archive = zipfile.ZipFile(io.BytesIO(blob))
+        contents: dict[str, str] = {}
+        for name in archive.namelist():
+            if name.endswith(".json"):
+                contents[name] = archive.read(name).decode("utf-8")
+        return contents
 
     def download_results_artifact(self, dispatch_ref: DispatchRef) -> dict[str, Any] | None:
         """Download and parse the structured ``ci-agent-results`` artifact.

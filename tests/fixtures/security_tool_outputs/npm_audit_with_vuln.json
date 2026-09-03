@@ -1,0 +1,43 @@
+{
+  "vulnerabilities": {
+    "semver": {
+      "name": "semver",
+      "severity": "high",
+      "isDirect": true,
+      "via": [
+        {
+          "title": "Regular Expression Denial of Service",
+          "url": "https://github.com/advisories/GHSA-8j59-89fp-m2v6",
+          "severity": "high",
+          "cwe": ["CWE-400"],
+          "source": 1059
+        }
+      ],
+      "effects": [],
+      "range": "<5.7.2",
+      "nodes": ["node_modules/semver"],
+      "fixAvailable": {"name": "semver", "version": "5.7.2", "isSemVerMajor": false}
+    },
+    "minimist": {
+      "name": "minimist",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        {
+          "title": "Prototype Pollution",
+          "url": "https://github.com/advisories/GHSA-v63p-8w99-7v2f",
+          "severity": "moderate",
+          "cwe": ["CWE-1321"],
+          "source": 1113
+        }
+      ],
+      "effects": [],
+      "range": "<1.2.6",
+      "nodes": ["node_modules/minimist"],
+      "fixAvailable": true
+    }
+  },
+  "metadata": {
+    "vulnerabilities": {"info": 0, "low": 0, "moderate": 1, "high": 1, "critical": 0, "total": 2}
+  }
+}

@@ -161,9 +161,13 @@ class StageExecutionRecord(Base):
     idempotent and transitions are monotonic (ExecutionObserver enforces the
     allowed-transition table; Report Section 7.3 state-confusion control).
 
-    ``logs_ref`` is a pointer/URL, never a full log blob. ``findings_ref`` is
-    reserved for Batch 6 (security adapters) — the column exists now so no
-    migration redesign is needed later.
+    ``logs_ref`` is a pointer/URL, never a full log blob. ``findings_ref``
+    (Batch 6): a small summary JSON blob ``{"count": N, "by_severity":
+    {...}, "parser_warnings": [...]}`` written by the Security Evidence
+    Service. ``FindingRecord`` rows are the source of truth for finding
+    DETAIL; this is a cheap per-stage rollup so reports need no join to say
+    "how many HIGHs did this stage produce". Documented decision: summary
+    here, detail in FindingRecord — no duplication of full rows.
     """
 
     __tablename__ = "stage_execution_records"
@@ -178,7 +182,7 @@ class StageExecutionRecord(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(), nullable=True)
     duration_ms: Mapped[int | None] = mapped_column(nullable=True)
     logs_ref: Mapped[str | None] = mapped_column(Text(), nullable=True)
-    # Reserved for Batch 6 (normalized findings pointer); intentionally nullable now.
+    # Batch 6: per-stage findings summary JSON (see class docstring).
     findings_ref: Mapped[str | None] = mapped_column(Text(), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow, onupdate=utcnow)
@@ -257,3 +261,36 @@ class PipelineSpecRecord(Base):
     content_hash: Mapped[str] = mapped_column(String(64), index=True)
     spec_json: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow)
+
+
+class FindingRecord(Base):
+    """One normalized security finding for a run (Batch 6; Report Section 9).
+
+    The source of truth for finding detail (severity, scanner, rule id,
+    component, location, disposition). Rows are written ONLY by the Security
+    Evidence Service, which guarantees that secret VALUES (e.g. gitleaks'
+    ``Secret``/``Match`` fields) never reach this table — location and rule
+    identity only (tested explicitly).
+    """
+
+    __tablename__ = "finding_records"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(String(64), ForeignKey("run_records.run_id"), index=True)
+    stage_id: Mapped[str] = mapped_column(String(64), index=True)
+    scanner: Mapped[str] = mapped_column(String(64))
+    rule_id: Mapped[str] = mapped_column(String(128))
+    # Governed Severity vocabulary (critical/high/medium/low/info).
+    severity: Mapped[str] = mapped_column(String(16))
+    component: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    description: Mapped[str] = mapped_column(Text(), default="")
+    location: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    # "open" until a governed waiver/disposition flow (later batch) changes it.
+    disposition: Mapped[str] = mapped_column(String(16), default="open")
+    created_at: Mapped[datetime] = mapped_column(DateTime(), default=utcnow)
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return (
+            f"<FindingRecord run_id={self.run_id!r} scanner={self.scanner!r} "
+            f"rule_id={self.rule_id!r} severity={self.severity!r}>"
+        )

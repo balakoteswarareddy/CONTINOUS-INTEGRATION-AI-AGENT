@@ -1,0 +1,35 @@
+{
+  "errors": [],
+  "generated_at": "2026-09-03T10:00:00Z",
+  "results": [
+    {
+      "code": "subprocess.call('ls ' + user_input, shell=True)\n",
+      "filename": "app/exec.py",
+      "issue_confidence": "HIGH",
+      "issue_severity": "HIGH",
+      "issue_text": "Starting a process with a shell: Seems safe, but may be changed in the future; consider rewriting without shell",
+      "line_number": 42,
+      "col_offset": 0,
+      "end_col_offset": 52,
+      "line_range": [42],
+      "more_info": "https://bandit.readthedocs.io/en/latest/plugins/b605_start_process_with_a_shell.html",
+      "test_id": "B605",
+      "test_name": "start_process_with_a_shell"
+    },
+    {
+      "code": "assert result == expected\n",
+      "filename": "app/exec.py",
+      "issue_confidence": "HIGH",
+      "issue_severity": "LOW",
+      "issue_text": "Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.",
+      "line_number": 87,
+      "col_offset": 0,
+      "end_col_offset": 30,
+      "line_range": [87],
+      "more_info": "https://bandit.readthedocs.io/en/latest/plugins/b101_assert_used.html",
+      "test_id": "B101",
+      "test_name": "assert_used"
+    }
+  ],
+  "metrics": {"_totals": {"SEV_HIGH": 1, "SEV_MEDIUM": 0, "SEV_LOW": 1}}
+}

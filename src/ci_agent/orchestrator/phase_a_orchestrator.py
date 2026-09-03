@@ -501,27 +501,75 @@ class PhaseAOrchestrator:
         spec_document: dict[str, Any],
         plan: ExecutionPlan,
     ) -> PolicyInputFacts:
-        """Policy gate facts: exit-code-only findings (MVP simplification).
+        """Policy gate facts: REAL parsed findings (Batch 6).
 
-        Failed tool stages become HIGH-severity findings; detailed scanner
-        output parsing arrives with Batch 6 (Task C) — never earlier.
+        Findings come from FindingRecord rows written by the Security
+        Evidence Service (raw scanner JSON parsed into the governed
+        vocabulary). Fail-closed additions:
+          * an unparseable/missing tool report is a ParserWarning-flagged
+            incident -> an explicit violation finding is added so the gate
+            fails (never "no parseable output = clean");
+          * a FAILED scan stage with NO persisted findings (collection never
+            ran / produced nothing) also yields a violation finding.
+        The Batch 5 "one exit-code-only HIGH per failed stage" placeholder is
+        fully removed (confirmed in NOTES.md).
         """
-        findings: list[dict[str, Any]] = []
+        from ci_agent.core.models.common import Severity as SeverityEnum
+        from ci_agent.security.security_evidence_service import SecurityEvidenceService
+
+        evidence = SecurityEvidenceService(self._session_factory, self._audit_store)
+        findings: list[dict[str, Any]] = [
+            {
+                "severity": record.severity,
+                "scanner": record.scanner,
+                "rule_id": record.rule_id,
+                "component": record.component,
+                "location": record.location,
+                "disposition": record.disposition,
+            }
+            for record in evidence.get_findings_for_run(run.run_id)
+        ]
+        for flag in evidence.parser_warnings(run.run_id):
+            findings.append(
+                {
+                    # Unparseable scanner output: treated as a security_policy
+                    # violation (fail-closed), never as a clean scan.
+                    "severity": SeverityEnum.HIGH.value,
+                    "scanner": str(flag["stage_id"]),
+                    "rule_id": "parser_warning_unparseable_output",
+                    "component": str(flag["stage_id"]),
+                    "disposition": "open",
+                }
+            )
+        # Failed scan stage with nothing persisted -> violation finding.
         with self._session_factory() as session:
-            records = (
+            failed_scans = (
                 session.execute(
-                    select(StageExecutionRecord).where(StageExecutionRecord.run_id == run.run_id)
+                    select(StageExecutionRecord).where(
+                        StageExecutionRecord.run_id == run.run_id,
+                        StageExecutionRecord.stage_id.in_(sorted(PRE_POLICY_STAGES)),
+                        StageExecutionRecord.status == "failed",
+                    )
                 )
                 .scalars()
                 .all()
             )
-        for record in records:
-            if record.status == "failed" and record.stage_id in PRE_POLICY_STAGES:
+        persisted_stages = (
+            {record.stage_id for record in evidence.get_findings_for_run(run.run_id)}
+            if findings
+            else set()
+        )
+        for record in failed_scans:
+            if record.stage_id not in persisted_stages and record.stage_id in (
+                "sast",
+                "secret_scan",
+                "dependency_scan",
+            ):
                 findings.append(
                     {
-                        "severity": "high",
+                        "severity": SeverityEnum.HIGH.value,
                         "scanner": record.stage_id,
-                        "rule_id": "stage_exit_code_nonzero",
+                        "rule_id": "scan_failed_without_parseable_findings",
                         "component": record.stage_id,
                         "disposition": "open",
                     }

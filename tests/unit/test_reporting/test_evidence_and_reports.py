@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -20,6 +21,9 @@ from ci_agent.reporting.report_models import (
     build_developer_report,
     build_management_report,
 )
+from ci_agent.security.security_evidence_service import SecurityEvidenceService
+
+FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "security_tool_outputs"
 
 
 @pytest.fixture()
@@ -29,7 +33,7 @@ def assembler(session_factory, audit_store: AuditStore) -> EvidenceAssembler:
 
 @pytest.fixture()
 def failed_run(session_factory, audit_store: AuditStore, observer: ExecutionObserver) -> str:
-    """A run whose secret_scan stage failed."""
+    """A run whose secret_scan stage failed, with a REAL parsed finding (Batch 6)."""
     audit_store.create_run(
         run_id="run-ev-1",
         project_id="example-org/payments-api",
@@ -40,6 +44,13 @@ def failed_run(session_factory, audit_store: AuditStore, observer: ExecutionObse
     observer.record_stage_transition("run-ev-1", "checkout", StageStatus.PASSED, exit_code=0)
     observer.record_stage_transition("run-ev-1", "secret_scan", StageStatus.FAILED, exit_code=1)
     audit_store.append_event("run-ev-1", "run_state_transition", {"from": None, "to": "failed"})
+    # Batch 6: findings come from the Security Evidence Service's table now.
+    SecurityEvidenceService(session_factory, audit_store).collect_findings(
+        "run-ev-1",
+        "secret_scan",
+        "gitleaks",
+        (FIXTURES / "gitleaks_with_secret.json").read_text(encoding="utf-8"),
+    )
     return "run-ev-1"
 
 
@@ -52,11 +63,12 @@ def test_evidence_model_from_tables(assembler: EvidenceAssembler, failed_run: st
     evidence = assembler.assemble_evidence(failed_run)
     assert evidence.run_id == failed_run
     assert evidence.source_commit == "cafe1234"
-    # Exit-code-only finding for the failed stage (MVP; Batch 6 enriches).
+    # REAL parsed finding (Batch 6): the gitleaks leak, CRITICAL.
     assert len(evidence.findings) == 1
     finding = evidence.findings[0]
-    assert finding.severity.value == "high"
-    assert finding.component == "secret_scan"
+    assert finding.severity.value == "critical"
+    assert finding.scanner == "gitleaks"
+    assert finding.rule_id == "aws-access-key-id"
     # Unpopulated fields are EMPTY, never omitted.
     assert evidence.artifacts == []
     assert evidence.attestations == []

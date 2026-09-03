@@ -26,7 +26,7 @@ from ci_agent.reporting.report_models import (
 
 router = APIRouter(tags=["reports"])
 
-ViewName = Literal["developer", "management", "compliance"]
+ViewName = Literal["developer", "management", "compliance", "security"]
 _VIEW_QUERY = Query(default="developer")
 
 
@@ -91,6 +91,31 @@ def get_report(
     if view == "developer":
         developer = build_developer_report(run, stages, findings_count=len(evidence.findings))
         return developer.model_dump(mode="json")
+
+    if view == "security":
+        # Batch 6 (Section 9): real scanner name, rule ID, severity,
+        # component, location, disposition per finding — no placeholders.
+        security = {
+            "run_id": run_id,
+            "findings": [
+                {
+                    "scanner": row.scanner,
+                    "rule_id": row.rule_id,
+                    "severity": row.severity,
+                    "component": row.component,
+                    "location": row.location,
+                    "disposition": row.disposition,
+                    "stage_id": row.stage_id,
+                }
+                for row in assembler.finding_records(run_id)
+            ],
+            "summary": {
+                severity.value: count
+                for severity, count in sorted(assembler.findings_summary(run_id).items())
+            },
+            "parser_warnings": assembler.security_evidence_warnings(run_id),
+        }
+        return security
 
     if view == "management":
         registry: ProjectRegistry = state.project_registry
