@@ -33,6 +33,11 @@ from ci_agent.adapters.gitlab_ci.client import GitLabClient
 from ci_agent.adapters.jenkins.adapter import JenkinsAdapter
 from ci_agent.adapters.jenkins.client import JenkinsClient
 from ci_agent.adapters.router import AdapterRouter
+from ci_agent.ai.features.failure_triage import FailureTriage
+from ci_agent.ai.features.pipeline_explainer import PipelineExplainer
+from ci_agent.ai.features.report_summarizer import ReportSummarizer
+from ci_agent.ai.features.requirement_normalizer import RequirementNormalizer
+from ci_agent.ai.gateway.provider_registry import build_gateway
 from ci_agent.audit.audit_store import AuditStore
 from ci_agent.config.settings import Settings, get_settings
 from ci_agent.db.base import Base, create_engine, get_session_factory
@@ -45,6 +50,7 @@ from ci_agent.governance import (
     load_policy_spec,
 )
 from ci_agent.ingress import github_webhook, gitlab_webhook
+from ci_agent.ingress.ai_api import router as ai_api_router
 from ci_agent.ingress.replay_guard import ReplayGuard
 from ci_agent.observer.execution_observer import ExecutionObserver
 from ci_agent.observer.github_events import ObserverEventHandlers
@@ -287,6 +293,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     opa_breaker = CircuitBreaker("opa", failure_threshold=5, recovery_timeout_seconds=30.0)
     github_breaker = CircuitBreaker("github", failure_threshold=8, recovery_timeout_seconds=60.0)
 
+    # --- Batch 9 (Section 13 Phase 4): the AI model gateway + features -----
+    # Breaker-wrapped, NoopProvider-fallback gateway. The committed ai_policy
+    # is deny-by-default (allowed_model_providers: [], allowed_data_
+    # classification: [public]), so with no governed policy change the
+    # gateway answers via the deterministic no-model fallback — the platform
+    # is fully functional before any provider is configured (Section 18).
+    # AI_PROVIDER defaults to noop (safe default; no model without explicit
+    # configuration).
+    ai_breaker = CircuitBreaker("model_gateway", failure_threshold=3, recovery_timeout_seconds=60.0)
+    model_gateway = build_gateway(
+        ai_policy=policy_spec.ai_policy,
+        session_factory=session_factory,
+        provider_setting=resolved_settings.resolved_ai_provider(),
+        token_budget=resolved_settings.model_token_budget,
+        breaker=ai_breaker,
+    )
+    failure_triage = FailureTriage(model_gateway)
+    report_summarizer = ReportSummarizer(model_gateway)
+    pipeline_explainer = PipelineExplainer(model_gateway)
+    requirement_normalizer = RequirementNormalizer(model_gateway)
+
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         # Local/dev convenience: create tables so a fresh checkout boots
@@ -331,6 +358,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.state.opa_breaker = opa_breaker
     application.state.github_breaker = github_breaker
     application.state.concurrency_guard = concurrency_guard
+    # Batch 9: AI gateway + features (advisory only; see ai/ package docs).
+    application.state.ai_breaker = ai_breaker
+    application.state.model_gateway = model_gateway
+    application.state.failure_triage = failure_triage
+    application.state.report_summarizer = report_summarizer
+    application.state.pipeline_explainer = pipeline_explainer
+    application.state.requirement_normalizer = requirement_normalizer
 
     application.include_router(github_webhook.router)
     application.include_router(gitlab_webhook.router)
@@ -338,6 +372,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(approval_api_router)
     application.include_router(report_api_router)
     application.include_router(exception_api_router)
+    application.include_router(ai_api_router)
 
     @application.get("/healthz")
     async def healthz(request: Request) -> dict[str, str]:

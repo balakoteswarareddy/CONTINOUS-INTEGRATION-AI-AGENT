@@ -19,6 +19,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
+from ci_agent.ai.features.failure_triage import TriageResult
 from ci_agent.core.models.common import RiskTier
 from ci_agent.core.models.evidence_model import EvidenceModel
 from ci_agent.db.models import PolicyDecisionRecord, RunRecord, StageExecutionRecord
@@ -63,6 +64,10 @@ class DeveloperReport(BaseModel):
     stages: list[StageReportRow]
     findings_count: int
     generated_at: datetime
+    # Batch 9 (Section 13 Phase 4): advisory AI failure triage for the
+    # failed stage, attached post-hoc via POST /runs/{run_id}/triage/{stage_id}.
+    # ADVISORY ONLY — never a gate outcome or evidence record.
+    triage: TriageResult | None = None
 
 
 class ManagementReport(BaseModel):

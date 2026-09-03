@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hmac
 import json
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, Request, Response, status
@@ -17,6 +18,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from ci_agent.projects.project_registry import (
     ProjectRegistry,
 )
+
+LOGGER = logging.getLogger("ci_agent.projects.admin_api")
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -92,9 +95,26 @@ def register_project(
 ) -> RegisterProjectResponse:
     _require_admin_key(request, x_admin_key, response)
     registry = _registry(request)
+    # Batch 9 (Section 13 Phase 4): AI-assisted normalization runs BEFORE the
+    # authoritative RequirementsResolver — pre-processing, never a replacement.
+    # The model can only suggest values for keys that already exist; missing
+    # required fields still fail in the resolver below. Any normalizer failure
+    # or fallback leaves the original answers untouched.
+    intake_answers: dict[str, Any] = payload.intake_answers
+    try:
+        normalization = request.app.state.requirement_normalizer.normalize(
+            raw_answers=payload.intake_answers,
+            intake_schema=request.app.state.intake_schema,
+            audit_store=request.app.state.audit_store,
+        )
+        intake_answers = normalization.normalized
+        for warning in normalization.warnings:
+            LOGGER.info("intake normalization (%s): %s", payload.repository, warning)
+    except Exception:  # normalization must never block onboarding
+        LOGGER.exception("AI intake normalization failed; using original answers")
     try:
         record = registry.register_project(
-            intake_answers=payload.intake_answers,
+            intake_answers=intake_answers,
             intake_schema=request.app.state.intake_schema,
             repository=payload.repository,
         )
